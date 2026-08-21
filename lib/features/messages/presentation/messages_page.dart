@@ -4,6 +4,8 @@ import '../../../core/config/app_config.dart';
 import '../../../core/supabase/supabase_client.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_widgets.dart';
+import 'direct_chat_page.dart';
+import '../../rooms/models/room.dart';
 
 class MessagesPage extends StatefulWidget {
   const MessagesPage({super.key, this.demoMode = false});
@@ -54,13 +56,55 @@ class _MessagesPageState extends State<MessagesPage> {
         if (userId != null) {
           final data = await SupabaseService.client
               .from('direct_messages')
-              .select(
-                '*, sender:profiles!direct_messages_sender_id_fkey(name, avatar_url), receiver:profiles!direct_messages_receiver_id_fkey(name, avatar_url)',
-              )
+              .select('id,sender_id,receiver_id,content,created_at,read_at')
               .or('sender_id.eq.$userId,receiver_id.eq.$userId')
               .order('created_at', ascending: false)
-              .limit(40);
-          _rows = (data as List).cast<Map<String, dynamic>>();
+              .limit(100);
+          final rawRows = (data as List).cast<Map<String, dynamic>>();
+          final partnerIds = rawRows
+              .map(
+                (row) => row['sender_id'] == userId
+                    ? row['receiver_id'] as String
+                    : row['sender_id'] as String,
+              )
+              .toSet()
+              .toList(growable: false);
+          final profiles = partnerIds.isEmpty
+              ? const <String, Map<String, dynamic>>{}
+              : {
+                  for (final profile
+                      in (await SupabaseService.client
+                                  .from('user_profiles')
+                                  .select('auth_user_id,data')
+                                  .inFilter('auth_user_id', partnerIds)
+                                  .limit(100)
+                              as List)
+                          .cast<Map<String, dynamic>>())
+                    profile['auth_user_id'] as String: profile,
+                };
+          final latestByPartner = <String, Map<String, dynamic>>{};
+          for (final row in rawRows) {
+            final partnerId = row['sender_id'] == userId
+                ? row['receiver_id'] as String
+                : row['sender_id'] as String;
+            if (latestByPartner.containsKey(partnerId)) continue;
+            final profile = profiles[partnerId];
+            final profileData = profile?['data'] is Map
+                ? Map<String, dynamic>.from(profile!['data'] as Map)
+                : const <String, dynamic>{};
+            latestByPartner[partnerId] = {
+              ...row,
+              'partner_id': partnerId,
+              'name':
+                  profileData['fullName'] ??
+                  profileData['userName'] ??
+                  profileData['name'] ??
+                  'مستخدم',
+              'avatar_url':
+                  profileData['avatarUrl'] ?? profileData['avatar_url'],
+            };
+          }
+          _rows = latestByPartner.values.toList(growable: false);
         }
       }
     } catch (_) {
@@ -165,11 +209,25 @@ class _ConversationTile extends StatelessWidget {
           ],
         ],
       ),
-      onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('شاشة المحادثة الخاصة ستُستكمل في المرحلة التالية.'),
-        ),
-      ),
+      onTap: () {
+        final partnerId = row['partner_id'] as String?;
+        if (partnerId == null) return;
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => DirectChatPage(
+              member: RoomMember(
+                userId: partnerId,
+                name: name,
+                avatarUrl:
+                    (row['avatar_url'] ??
+                            sender?['avatar_url'] ??
+                            receiver?['avatar_url'])
+                        as String?,
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

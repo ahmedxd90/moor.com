@@ -233,6 +233,7 @@ class RoomsRepository {
     final profiles = await _profilesByUserIds(
       maps.map((row) => row['user_id'] as String).toSet().toList(),
     );
+    final moderatorIds = await _fetchRoomModeratorIds(roomId);
     String? ownerId;
     try {
       final room = await _client
@@ -250,6 +251,7 @@ class RoomsRepository {
           if (ownerId != null && row['user_id'] == ownerId) {
             adjusted['role'] = 'owner';
           }
+          adjusted['is_moderator'] = moderatorIds.contains(row['user_id']);
           return RoomMember.fromMap(
             adjusted,
             profile: profiles[row['user_id'] as String],
@@ -274,6 +276,21 @@ class RoomsRepository {
       };
     } catch (_) {
       return <String, Map<String, dynamic>>{};
+    }
+  }
+
+  Future<Set<String>> _fetchRoomModeratorIds(String roomId) async {
+    try {
+      final rows = await _client
+          .from('room_moderators')
+          .select('user_id')
+          .eq('room_id', roomId)
+          .limit(100);
+      return (rows as List)
+          .map((row) => (row as Map<String, dynamic>)['user_id'] as String)
+          .toSet();
+    } catch (_) {
+      return <String>{};
     }
   }
 
@@ -530,6 +547,288 @@ class RoomsRepository {
         event: 'seat_reaction_changed',
         callback: (_) async {
           if (!controller.isClosed) controller.add(await fetch());
+        },
+      )
+      ..subscribe();
+    try {
+      yield* controller.stream;
+    } finally {
+      await _client.removeChannel(channel);
+      await controller.close();
+    }
+  }
+
+  Future<bool> isFollowingUser(String userId) async {
+    final current = currentUserId;
+    if (current == null || current == userId) return false;
+    final row = await _client
+        .from('user_follows')
+        .select('follower_id')
+        .eq('follower_id', current)
+        .eq('following_id', userId)
+        .maybeSingle();
+    return row != null;
+  }
+
+  Future<bool> toggleUserFollow(String userId) async {
+    final current = currentUserId;
+    if (current == null) throw const AuthException('يجب تسجيل الدخول للمتابعة');
+    if (current == userId) throw const AuthException('لا يمكنك متابعة نفسك');
+    final existing = await _client
+        .from('user_follows')
+        .select('follower_id')
+        .eq('follower_id', current)
+        .eq('following_id', userId)
+        .maybeSingle();
+    if (existing != null) {
+      await _client
+          .from('user_follows')
+          .delete()
+          .eq('follower_id', current)
+          .eq('following_id', userId);
+      return false;
+    }
+    await _client.from('user_follows').insert({
+      'follower_id': current,
+      'following_id': userId,
+    });
+    return true;
+  }
+
+  Future<void> reportUser({
+    required String targetUserId,
+    String? roomId,
+    required String reason,
+  }) async {
+    final current = currentUserId;
+    if (current == null) throw const AuthException('يجب تسجيل الدخول للإبلاغ');
+    await _client.from('user_reports').insert({
+      'reporter_id': current,
+      'target_user_id': targetUserId,
+      'room_id': roomId,
+      'reason': reason.trim(),
+    });
+  }
+
+  Future<void> removeRoomMember({
+    required String roomId,
+    required String userId,
+  }) async {
+    final current = currentUserId;
+    if (current == null) throw const AuthException('يجب تسجيل الدخول');
+    await _client
+        .from('voice_room_members')
+        .update({
+          'left_at': DateTime.now().toUtc().toIso8601String(),
+          'seat_index': null,
+          'is_speaking': false,
+          'is_muted': true,
+        })
+        .eq('room_id', roomId)
+        .eq('user_id', userId);
+    await _broadcastRoomEvent(roomId, 'member_changed');
+  }
+
+  Future<void> banRoomMember({
+    required String roomId,
+    required String userId,
+    required String reason,
+    int? durationMinutes,
+  }) async {
+    final current = currentUserId;
+    if (current == null) throw const AuthException('يجب تسجيل الدخول');
+    final expiresAt = durationMinutes == null || durationMinutes <= 0
+        ? null
+        : DateTime.now()
+              .toUtc()
+              .add(Duration(minutes: durationMinutes))
+              .toIso8601String();
+    await _client.from('room_bans').upsert({
+      'room_id': roomId,
+      'user_id': userId,
+      'created_by': current,
+      'reason': reason.trim(),
+      'expires_at': expiresAt,
+    }, onConflict: 'room_id,user_id');
+    await removeRoomMember(roomId: roomId, userId: userId);
+  }
+
+  Future<void> unbanRoomMember({
+    required String roomId,
+    required String userId,
+  }) async {
+    await _client
+        .from('room_bans')
+        .delete()
+        .eq('room_id', roomId)
+        .eq('user_id', userId);
+  }
+
+  Future<void> setRoomChatMute({
+    required String roomId,
+    required String userId,
+    int? durationMinutes,
+  }) async {
+    final current = currentUserId;
+    if (current == null) throw const AuthException('يجب تسجيل الدخول');
+    final expiresAt = durationMinutes == null || durationMinutes <= 0
+        ? null
+        : DateTime.now()
+              .toUtc()
+              .add(Duration(minutes: durationMinutes))
+              .toIso8601String();
+    await _client.from('room_chat_mutes').upsert({
+      'room_id': roomId,
+      'user_id': userId,
+      'created_by': current,
+      'expires_at': expiresAt,
+    }, onConflict: 'room_id,user_id');
+  }
+
+  Future<void> clearRoomChatMute({
+    required String roomId,
+    required String userId,
+  }) async {
+    await _client
+        .from('room_chat_mutes')
+        .delete()
+        .eq('room_id', roomId)
+        .eq('user_id', userId);
+  }
+
+  Future<bool> setRoomModerator({
+    required String roomId,
+    required String userId,
+    required bool enabled,
+  }) async {
+    final result = await _client.rpc(
+      'set_room_moderator',
+      params: {'p_room_id': roomId, 'p_user_id': userId, 'p_enabled': enabled},
+    );
+    await _broadcastRoomEvent(roomId, 'member_changed');
+    return result == true;
+  }
+
+  Future<String> inviteUserToSeat({
+    required String roomId,
+    required String userId,
+    required int seatIndex,
+  }) async {
+    final result = await _client.rpc(
+      'send_room_seat_invite',
+      params: {
+        'p_room_id': roomId,
+        'p_invitee_id': userId,
+        'p_seat_index': seatIndex,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<List<RoomSeatInvite>> fetchPendingSeatInvites(String roomId) async {
+    final current = currentUserId;
+    if (current == null) return const <RoomSeatInvite>[];
+    final rows = await _client
+        .from('room_seat_invites')
+        .select(
+          'id,room_id,inviter_id,invitee_id,seat_index,status,expires_at,created_at',
+        )
+        .eq('room_id', roomId)
+        .eq('invitee_id', current)
+        .eq('status', 'pending')
+        .order('created_at', ascending: false)
+        .limit(5);
+    return (rows as List)
+        .cast<Map<String, dynamic>>()
+        .map(RoomSeatInvite.fromMap)
+        .where(
+          (invite) =>
+              invite.expiresAt == null ||
+              invite.expiresAt!.isAfter(DateTime.now()),
+        )
+        .toList(growable: false);
+  }
+
+  Stream<List<RoomSeatInvite>> watchPendingSeatInvites(String roomId) async* {
+    yield await fetchPendingSeatInvites(roomId);
+    final controller = StreamController<List<RoomSeatInvite>>();
+    final channel = _client.channel('public:room-seat-invites:$roomId')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'room_seat_invites',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'room_id',
+          value: roomId,
+        ),
+        callback: (_) async {
+          if (!controller.isClosed) {
+            controller.add(await fetchPendingSeatInvites(roomId));
+          }
+        },
+      )
+      ..subscribe();
+    try {
+      yield* controller.stream;
+    } finally {
+      await _client.removeChannel(channel);
+      await controller.close();
+    }
+  }
+
+  Future<bool> respondToSeatInvite({
+    required String inviteId,
+    required bool accept,
+  }) async {
+    final result = await _client.rpc(
+      'respond_room_seat_invite',
+      params: {'p_invite_id': inviteId, 'p_accept': accept},
+    );
+    return result == true;
+  }
+
+  Future<void> sendDirectMessage({
+    required String receiverId,
+    required String content,
+  }) async {
+    final current = currentUserId;
+    final trimmed = content.trim();
+    if (current == null) throw const AuthException('يجب تسجيل الدخول');
+    if (trimmed.isEmpty) return;
+    await _client.from('direct_messages').insert({
+      'sender_id': current,
+      'receiver_id': receiverId,
+      'content': trimmed,
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> fetchDirectMessages(String userId) async {
+    final current = currentUserId;
+    if (current == null) return const <Map<String, dynamic>>[];
+    final rows = await _client
+        .from('direct_messages')
+        .select('id,sender_id,receiver_id,content,created_at,read_at')
+        .or(
+          'and(sender_id.eq.$current,receiver_id.eq.$userId),and(sender_id.eq.$userId,receiver_id.eq.$current)',
+        )
+        .order('created_at', ascending: true)
+        .limit(100);
+    return (rows as List).cast<Map<String, dynamic>>();
+  }
+
+  Stream<List<Map<String, dynamic>>> watchDirectMessages(String userId) async* {
+    yield await fetchDirectMessages(userId);
+    final controller = StreamController<List<Map<String, dynamic>>>();
+    final channel = _client.channel('public:direct-messages:$userId')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'direct_messages',
+        callback: (_) async {
+          if (!controller.isClosed) {
+            controller.add(await fetchDirectMessages(userId));
+          }
         },
       )
       ..subscribe();

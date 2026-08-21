@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../messages/data/messages_repository.dart';
+import '../../messages/presentation/direct_chat_page.dart';
 import '../data/agora_audio_service.dart';
 import '../data/rooms_repository.dart';
 import '../models/room.dart';
@@ -39,6 +40,7 @@ class _RoomPageState extends State<RoomPage> {
   StreamSubscription<List<RoomGift>>? _giftSubscription;
   StreamSubscription<List<SeatReaction>>? _reactionSubscription;
   StreamSubscription<AgoraAudioState>? _agoraSubscription;
+  StreamSubscription<List<RoomSeatInvite>>? _inviteSubscription;
   Timer? _giftTimer;
   Timer? _joinBannerTimer;
   String? _giftOverlay;
@@ -169,6 +171,9 @@ class _RoomPageState extends State<RoomPage> {
       ) {
         if (mounted) setState(() => _reactions = items);
       });
+      _inviteSubscription = _rooms
+          .watchPendingSeatInvites(_room.id)
+          .listen(_handleSeatInvites);
       _agoraSubscription = _agora.states.listen((state) {
         if (!mounted) return;
         setState(() {
@@ -206,6 +211,7 @@ class _RoomPageState extends State<RoomPage> {
     _memberSubscription?.cancel();
     _giftSubscription?.cancel();
     _reactionSubscription?.cancel();
+    _inviteSubscription?.cancel();
     _agoraSubscription?.cancel();
     _giftTimer?.cancel();
     _joinBannerTimer?.cancel();
@@ -234,6 +240,37 @@ class _RoomPageState extends State<RoomPage> {
       });
     }
   }
+
+  void _handleSeatInvites(List<RoomSeatInvite> invites) {
+    if (!mounted || invites.isEmpty) return;
+    final invite = invites.first;
+    if (_lastInviteId == invite.id) return;
+    _lastInviteId = invite.id;
+    unawaited(_showSeatInvite(invite));
+  }
+
+  Future<void> _showSeatInvite(RoomSeatInvite invite) async {
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _SeatInviteDialog(invite: invite),
+    );
+    if (!mounted || accepted == null) return;
+    try {
+      final joined = await _rooms.respondToSeatInvite(
+        inviteId: invite.id,
+        accept: accepted,
+      );
+      if (accepted && joined) await _agora.takeSeat();
+      if (mounted) {
+        _show(accepted ? 'تم قبول الدعوة وأخذ المقعد' : 'تم رفض الدعوة');
+      }
+    } catch (error) {
+      if (mounted) _show(error.toString(), error: true);
+    }
+  }
+
+  String? _lastInviteId;
 
   RoomMember? get _currentMember {
     final userId = widget.demoMode ? 'demo-owner' : _rooms.currentUserId;
@@ -579,6 +616,13 @@ class _RoomPageState extends State<RoomPage> {
     return _rooms.currentUserId == _room.ownerId;
   }
 
+  bool get _isCurrentUserModerator {
+    if (widget.demoMode) return true;
+    return _currentMember?.isModerator == true;
+  }
+
+  bool get _canManageMembers => _isCurrentUserOwner || _isCurrentUserModerator;
+
   Future<void> _openSeatAction(int index) async {
     final member = _memberAt(index);
     final current = _currentMember;
@@ -746,15 +790,27 @@ class _RoomPageState extends State<RoomPage> {
       itemCount: _messageItems.length,
       itemBuilder: (_, index) {
         final item = _messageItems[_messageItems.length - 1 - index];
+        final messageMember =
+            _members
+                .where((member) => member.userId == item.userId)
+                .firstOrNull ??
+            RoomMember(
+              userId: item.userId,
+              name: item.authorName ?? 'عضو',
+              avatarUrl: item.authorAvatarUrl,
+            );
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SakiAvatar(
-                name: item.authorName,
-                url: item.authorAvatarUrl,
-                size: 28,
+              GestureDetector(
+                onTap: () => _openMemberInfo(messageMember),
+                child: SakiAvatar(
+                  name: item.authorName,
+                  url: item.authorAvatarUrl,
+                  size: 28,
+                ),
               ),
               const SizedBox(width: 7),
               Flexible(
@@ -1050,33 +1106,244 @@ class _RoomPageState extends State<RoomPage> {
   }
 
   Future<void> _openMemberInfo(RoomMember member) async {
-    await showModalBottomSheet<void>(
+    final currentId = widget.demoMode ? 'demo-owner' : _rooms.currentUserId;
+    final canManage =
+        _canManageMembers && member.userId != currentId && !member.isOwner;
+    final following = widget.demoMode
+        ? false
+        : await _rooms.isFollowingUser(member.userId);
+    if (!mounted) return;
+    await showDialog<void>(
       context: context,
-      backgroundColor: Colors.white,
-      showDragHandle: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (_) => Material(
-        color: Colors.white,
-        child: Container(
-          color: Colors.white,
-          constraints: const BoxConstraints(minHeight: 260),
-          child: _UserInfoSheet(
-            member: member,
-            isOwner: _isCurrentUserOwner,
-            onMute: member.userId == _rooms.currentUserId || member.isOwner
-                ? null
-                : () async {
-                    Navigator.pop(context);
-                    await _rooms.setMemberMuted(
-                      roomId: _room.id,
-                      userId: member.userId,
-                      muted: !member.isMuted,
-                    );
-                  },
-          ),
+      barrierColor: Colors.black54,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 30),
+        child: _UserInfoSheet(
+          member: member,
+          isOwner: _isCurrentUserOwner,
+          isModerator: member.isModerator,
+          canManage: canManage,
+          isFollowing: following,
+          onToggleFollow: widget.demoMode
+              ? null
+              : () async {
+                  final next = await _rooms.toggleUserFollow(member.userId);
+                  if (mounted) {
+                    _show(next ? 'تمت المتابعة' : 'تم إلغاء المتابعة');
+                  }
+                },
+          onSendGift: () async {
+            _giftReceiver = member;
+            await _openGiftPicker();
+          },
+          onPrivateChat: () => _openDirectChat(member),
+          onMention: () {
+            _text.text = '@${member.name} ';
+            _text.selection = TextSelection.fromPosition(
+              TextPosition(offset: _text.text.length),
+            );
+            Navigator.pop(context);
+            _openMessageComposer();
+          },
+          onReport: widget.demoMode ? null : () => _reportMember(member),
+          onMute: canManage
+              ? () => _runMemberAction(() async {
+                  await _rooms.setMemberMuted(
+                    roomId: _room.id,
+                    userId: member.userId,
+                    muted: !member.isMuted,
+                  );
+                }, 'تم تحديث كتم الميكروفون')
+              : null,
+          onKick: canManage
+              ? () => _runMemberAction(
+                  () => _rooms.removeRoomMember(
+                    roomId: _room.id,
+                    userId: member.userId,
+                  ),
+                  'تم إخراج المستخدم من الغرفة',
+                )
+              : null,
+          onBan: canManage ? () => _banMember(member) : null,
+          onChatMute: canManage ? () => _muteMemberChat(member) : null,
+          onToggleModerator: _isCurrentUserOwner
+              ? () => _runMemberAction(
+                  () => _rooms.setRoomModerator(
+                    roomId: _room.id,
+                    userId: member.userId,
+                    enabled: !member.isModerator,
+                  ),
+                  member.isModerator ? 'تمت إزالة المشرف' : 'تم تعيين مشرف',
+                )
+              : null,
+          onInvite: canManage ? () => _inviteMemberToSeat(member) : null,
         ),
+      ),
+    );
+  }
+
+  Future<void> _runMemberAction(
+    Future<void> Function() action,
+    String successMessage,
+  ) async {
+    Navigator.of(context).pop();
+    try {
+      await action();
+      if (mounted) _show(successMessage);
+    } catch (error) {
+      if (mounted) _show(error.toString(), error: true);
+    }
+  }
+
+  Future<void> _banMember(RoomMember member) async {
+    final duration = await _pickModerationDuration('مدة الحظر');
+    if (!mounted || duration == null) return;
+    await _runMemberAction(
+      () => _rooms.banRoomMember(
+        roomId: _room.id,
+        userId: member.userId,
+        reason: 'إجراء إدارة الغرفة',
+        durationMinutes: duration,
+      ),
+      duration == 0
+          ? 'تم حظر المستخدم حتى إلغاء الحظر'
+          : 'تم حظر المستخدم مؤقتًا',
+    );
+  }
+
+  Future<void> _muteMemberChat(RoomMember member) async {
+    final duration = await _pickModerationDuration('مدة كتم الدردشة');
+    if (!mounted || duration == null) return;
+    await _runMemberAction(
+      () => _rooms.setRoomChatMute(
+        roomId: _room.id,
+        userId: member.userId,
+        durationMinutes: duration,
+      ),
+      duration == 0 ? 'تم كتم دردشة المستخدم' : 'تم كتم الدردشة مؤقتًا',
+    );
+  }
+
+  Future<int?> _pickModerationDuration(String title) async {
+    return showDialog<int>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w900)),
+        content: const Text('اختر المدة. اختيار دائم يبقى حتى إلغاء الإجراء.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('إلغاء'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 10),
+            child: const Text('10 دقائق'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 60),
+            child: const Text('ساعة'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, 0),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
+            child: const Text('دائم'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _inviteMemberToSeat(RoomMember member) async {
+    final occupied = _members
+        .where((item) => item.seatIndex != null)
+        .map((item) => item.seatIndex!)
+        .toSet();
+    final available = List<int>.generate(
+      _room.seatCount,
+      (index) => index,
+    ).where((index) => !occupied.contains(index)).toList(growable: false);
+    if (available.isEmpty) {
+      _show('لا يوجد مقعد فارغ حاليًا.', error: true);
+      return;
+    }
+    final seat = await showDialog<int>(
+      context: context,
+      builder: (_) => SimpleDialog(
+        title: const Text(
+          'دعوة إلى مقعد',
+          style: TextStyle(fontWeight: FontWeight.w900),
+        ),
+        children: available
+            .take(12)
+            .map(
+              (index) => SimpleDialogOption(
+                onPressed: () => Navigator.pop(context, index),
+                child: Text('المقعد ${index + 1}'),
+              ),
+            )
+            .toList(),
+      ),
+    );
+    if (!mounted || seat == null) return;
+    await _runMemberAction(() async {
+      await _rooms.inviteUserToSeat(
+        roomId: _room.id,
+        userId: member.userId,
+        seatIndex: seat,
+      );
+    }, 'تم إرسال دعوة المقعد');
+  }
+
+  Future<void> _reportMember(RoomMember member) async {
+    final controller = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text(
+          'الإبلاغ عن المستخدم',
+          style: TextStyle(fontWeight: FontWeight.w900),
+        ),
+        content: TextField(
+          controller: controller,
+          maxLines: 3,
+          decoration: const InputDecoration(hintText: 'اكتب سبب البلاغ...'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
+            child: const Text('إرسال البلاغ'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (!mounted || reason == null || reason.isEmpty) return;
+    Navigator.of(context).pop();
+    try {
+      await _rooms.reportUser(
+        targetUserId: member.userId,
+        roomId: _room.id,
+        reason: reason,
+      );
+      if (mounted) _show('تم إرسال البلاغ للمراجعة');
+    } catch (error) {
+      if (mounted) _show(error.toString(), error: true);
+    }
+  }
+
+  Future<void> _openDirectChat(RoomMember member) async {
+    Navigator.of(context).pop();
+    if (!mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) =>
+            DirectChatPage(member: member, demoMode: widget.demoMode),
       ),
     );
   }
@@ -2167,68 +2434,357 @@ class _ConnectedMembersSheet extends StatelessWidget {
   }
 }
 
+class _SeatInviteDialog extends StatelessWidget {
+  const _SeatInviteDialog({required this.invite});
+
+  final RoomSeatInvite invite;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+      title: const Row(
+        children: [
+          Icon(Icons.event_seat_rounded, color: AppColors.primary),
+          SizedBox(width: 8),
+          Text('دعوة إلى مقعد', style: TextStyle(fontWeight: FontWeight.w900)),
+        ],
+      ),
+      content: Text(
+        'تمت دعوتك للصعود إلى المقعد رقم ${invite.seatIndex + 1}. هل تريد التحدث؟',
+        textAlign: TextAlign.center,
+        style: const TextStyle(color: AppColors.mutedText, height: 1.6),
+      ),
+      actionsAlignment: MainAxisAlignment.spaceEvenly,
+      actions: [
+        OutlinedButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('رفض'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
+          child: const Text('قبول'),
+        ),
+      ],
+    );
+  }
+}
+
 class _UserInfoSheet extends StatelessWidget {
   const _UserInfoSheet({
     required this.member,
     required this.isOwner,
+    required this.isModerator,
+    required this.canManage,
+    required this.isFollowing,
+    this.onToggleFollow,
+    this.onSendGift,
+    this.onPrivateChat,
+    this.onMention,
+    this.onReport,
     this.onMute,
+    this.onKick,
+    this.onBan,
+    this.onChatMute,
+    this.onToggleModerator,
+    this.onInvite,
   });
 
   final RoomMember member;
   final bool isOwner;
-  final VoidCallback? onMute;
+  final bool isModerator;
+  final bool canManage;
+  final bool isFollowing;
+  final Future<void> Function()? onToggleFollow;
+  final Future<void> Function()? onSendGift;
+  final Future<void> Function()? onPrivateChat;
+  final VoidCallback? onMention;
+  final Future<void> Function()? onReport;
+  final Future<void> Function()? onMute;
+  final Future<void> Function()? onKick;
+  final Future<void> Function()? onBan;
+  final Future<void> Function()? onChatMute;
+  final Future<void> Function()? onToggleModerator;
+  final Future<void> Function()? onInvite;
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(22, 4, 22, 24),
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 380, maxHeight: 660),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: AppColors.primary.withValues(alpha: .20)),
+        boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 28)],
+      ),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            SakiAvatar(name: member.name, url: member.avatarUrl, size: 72),
-            const SizedBox(height: 10),
-            Text(
-              member.name,
-              style: const TextStyle(
-                color: AppColors.text,
-                fontSize: 19,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'ID: ${member.sakiId ?? 'غير متاح'}',
-              style: const TextStyle(color: AppColors.mutedText, fontSize: 11),
-            ),
-            const SizedBox(height: 14),
             Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                _InfoChip(
-                  icon: Icons.event_seat_rounded,
-                  label:
-                      'المقعد ${member.seatIndex == null ? '—' : member.seatIndex! + 1}',
+                IconButton(
+                  onPressed: onReport == null ? null : () => onReport!(),
+                  icon: const Icon(
+                    Icons.flag_outlined,
+                    color: AppColors.primary,
+                  ),
+                  tooltip: 'إبلاغ',
                 ),
-                const SizedBox(width: 8),
-                _InfoChip(
-                  icon: Icons.mic_rounded,
-                  label: member.isMuted ? 'مكتوم' : 'متحدث',
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(
+                    Icons.close_rounded,
+                    color: AppColors.mutedText,
+                  ),
                 ),
               ],
             ),
-            if (isOwner && onMute != null) ...[
-              const SizedBox(height: 15),
-              OutlinedButton.icon(
-                onPressed: onMute,
-                icon: const Icon(Icons.mic_off_rounded),
-                label: const Text('كتم العضو'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.primary,
-                  side: const BorderSide(color: AppColors.primary),
+            SakiAvatar(name: member.name, url: member.avatarUrl, size: 88),
+            const SizedBox(height: 12),
+            Text(
+              member.name,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: AppColors.text,
+                fontSize: 21,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              'Saki ID: ${member.sakiId ?? 'غير متاح'}',
+              style: const TextStyle(color: AppColors.mutedText, fontSize: 12),
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 7,
+              runSpacing: 7,
+              children: [
+                _InfoChip(
+                  icon: member.isOwner
+                      ? Icons.workspace_premium_rounded
+                      : isModerator
+                      ? Icons.shield_rounded
+                      : Icons.headphones_rounded,
+                  label: member.isOwner
+                      ? 'مالك الغرفة'
+                      : isModerator
+                      ? 'مشرف'
+                      : 'مستمع',
+                ),
+                _InfoChip(
+                  icon: Icons.event_seat_rounded,
+                  label: member.seatIndex == null
+                      ? 'بدون مقعد'
+                      : 'المقعد ${member.seatIndex! + 1}',
+                ),
+                _InfoChip(
+                  icon: member.isMuted
+                      ? Icons.mic_off_rounded
+                      : Icons.mic_rounded,
+                  label: member.isMuted
+                      ? 'الميكروفون مكتوم'
+                      : 'الميكروفون متاح',
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: onSendGift == null
+                        ? null
+                        : () async {
+                            await onSendGift!();
+                          },
+                    icon: const Icon(Icons.card_giftcard_rounded, size: 18),
+                    label: const Text('أرسل هدية'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: onToggleFollow == null
+                        ? null
+                        : () async {
+                            await onToggleFollow!();
+                          },
+                    icon: Icon(
+                      isFollowing ? Icons.check_rounded : Icons.add_rounded,
+                    ),
+                    label: Text(isFollowing ? 'متابَع' : 'متابعة'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.primary,
+                      side: const BorderSide(color: AppColors.primary),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: _ProfileActionButton(
+                    icon: Icons.alternate_email_rounded,
+                    label: 'إشارة',
+                    onTap: onMention,
+                  ),
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: _ProfileActionButton(
+                    icon: Icons.chat_bubble_outline_rounded,
+                    label: 'دردشة خاصة',
+                    onTap: onPrivateChat == null
+                        ? null
+                        : () async => onPrivateChat!(),
+                  ),
+                ),
+              ],
+            ),
+            if (canManage) ...[
+              const SizedBox(height: 16),
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Text(
+                  isOwner ? 'إدارة المستخدم' : 'إجراءات المشرف',
+                  style: const TextStyle(
+                    color: AppColors.text,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
+                  ),
                 ),
               ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 7,
+                runSpacing: 7,
+                children: [
+                  _AdminAction(
+                    icon: member.isMuted
+                        ? Icons.mic_rounded
+                        : Icons.mic_off_rounded,
+                    label: member.isMuted ? 'إلغاء كتم المايك' : 'كتم المايك',
+                    onTap: onMute,
+                  ),
+                  _AdminAction(
+                    icon: Icons.event_seat_rounded,
+                    label: 'دعوة للمقعد',
+                    onTap: onInvite,
+                  ),
+                  if (isOwner)
+                    _AdminAction(
+                      icon: isModerator
+                          ? Icons.person_remove_rounded
+                          : Icons.shield_rounded,
+                      label: isModerator ? 'إزالة مشرف' : 'تعيين مشرف',
+                      onTap: onToggleModerator,
+                    ),
+                  _AdminAction(
+                    icon: Icons.chat_bubble_outline_rounded,
+                    label: 'كتم الدردشة',
+                    onTap: onChatMute,
+                  ),
+                  _AdminAction(
+                    icon: Icons.logout_rounded,
+                    label: 'طرد',
+                    danger: true,
+                    onTap: onKick,
+                  ),
+                  _AdminAction(
+                    icon: Icons.block_rounded,
+                    label: 'حظر',
+                    danger: true,
+                    onTap: onBan,
+                  ),
+                ],
+              ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfileActionButton extends StatelessWidget {
+  const _ProfileActionButton({
+    required this.icon,
+    required this.label,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 16),
+      label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppColors.text,
+        side: const BorderSide(color: AppColors.border),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      ),
+    );
+  }
+}
+
+class _AdminAction extends StatelessWidget {
+  const _AdminAction({
+    required this.icon,
+    required this.label,
+    this.onTap,
+    this.danger = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final Future<void> Function()? onTap;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = danger ? const Color(0xFFDC2626) : AppColors.primary;
+    return InkWell(
+      borderRadius: BorderRadius.circular(13),
+      onTap: onTap == null ? null : () async => onTap!(),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: .08),
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(color: color.withValues(alpha: .22)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
           ],
         ),
       ),

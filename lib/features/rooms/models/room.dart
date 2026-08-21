@@ -106,6 +106,7 @@ class RoomMember {
     this.joinedAt,
     this.isMuted = false,
     this.isSpeaking = false,
+    this.isModerator = false,
   });
 
   final String userId;
@@ -117,6 +118,7 @@ class RoomMember {
   final DateTime? joinedAt;
   final bool isMuted;
   final bool isSpeaking;
+  final bool isModerator;
 
   bool get isOwner => role == 'owner' || role == 'host';
   bool get isSpeaker => seatIndex != null;
@@ -147,8 +149,42 @@ class RoomMember {
       joinedAt: DateTime.tryParse(map['joined_at'] as String? ?? '')?.toLocal(),
       isMuted: map['is_muted'] == true,
       isSpeaking: map['is_speaking'] == true,
+      isModerator: map['is_moderator'] == true,
     );
   }
+}
+
+class RoomSeatInvite {
+  const RoomSeatInvite({
+    required this.id,
+    required this.roomId,
+    required this.inviterId,
+    required this.inviteeId,
+    required this.seatIndex,
+    required this.status,
+    this.expiresAt,
+    this.createdAt,
+  });
+
+  final String id;
+  final String roomId;
+  final String inviterId;
+  final String inviteeId;
+  final int seatIndex;
+  final String status;
+  final DateTime? expiresAt;
+  final DateTime? createdAt;
+
+  factory RoomSeatInvite.fromMap(Map<String, dynamic> map) => RoomSeatInvite(
+    id: map['id'] as String,
+    roomId: map['room_id'] as String,
+    inviterId: map['inviter_id'] as String,
+    inviteeId: map['invitee_id'] as String,
+    seatIndex: (map['seat_index'] as num?)?.toInt() ?? 0,
+    status: (map['status'] as String?) ?? 'pending',
+    expiresAt: DateTime.tryParse(map['expires_at'] as String? ?? '')?.toLocal(),
+    createdAt: DateTime.tryParse(map['created_at'] as String? ?? '')?.toLocal(),
+  );
 }
 
 class RoomGift {
