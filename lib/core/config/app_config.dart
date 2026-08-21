@@ -3,12 +3,12 @@ class AppConfig {
 
   static const supabaseUrl = String.fromEnvironment(
     'SUPABASE_URL',
-    defaultValue: 'https://YOUR_PROJECT.supabase.co',
+    defaultValue: 'https://uhaugikrudchlunaufjj.supabase.co',
   );
 
   static const supabasePublishableKey = String.fromEnvironment(
     'SUPABASE_PUBLISHABLE_KEY',
-    defaultValue: 'YOUR_SUPABASE_PUBLISHABLE_KEY',
+    defaultValue: 'sb_publishable_wPa5bmVYZ7D-oy9qHPqHKg_Jvb0rgpX',
   );
 
   static const appName = 'Saki Chat';

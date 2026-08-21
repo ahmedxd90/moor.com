@@ -16,7 +16,9 @@ Future<void> main() async {
 }
 
 class SakiChatApp extends StatelessWidget {
-  const SakiChatApp({super.key});
+  const SakiChatApp({super.key, this.demoMode = false});
+
+  final bool demoMode;
 
   @override
   Widget build(BuildContext context) {
@@ -29,13 +31,15 @@ class SakiChatApp extends StatelessWidget {
         textDirection: TextDirection.rtl,
         child: child ?? const SizedBox.shrink(),
       ),
-      home: const AuthGate(),
+      home: AuthGate(demoMode: demoMode),
     );
   }
 }
 
 class AuthGate extends StatefulWidget {
-  const AuthGate({super.key});
+  const AuthGate({super.key, this.demoMode = false});
+
+  final bool demoMode;
 
   @override
   State<AuthGate> createState() => _AuthGateState();
@@ -47,6 +51,13 @@ class _AuthGateState extends State<AuthGate> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.demoMode) {
+      if (_demoEntered) return const HomeShell(demoMode: true);
+      return LoginPage(
+        demoMode: true,
+        onDemoEnter: () => setState(() => _demoEntered = true),
+      );
+    }
     if (!AppConfig.isConfigured) {
       if (_demoEntered) return const HomeShell(demoMode: true);
       return LoginPage(

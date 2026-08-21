@@ -4,7 +4,7 @@ import 'package:saki_chat_flutter/main.dart';
 
 void main() {
   testWidgets('Saki Chat app renders the login shell', (tester) async {
-    await tester.pumpWidget(const SakiChatApp());
+    await tester.pumpWidget(const SakiChatApp(demoMode: true));
     await tester.pump();
 
     expect(find.text('Saki'), findsOneWidget);
