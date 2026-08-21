@@ -10,6 +10,8 @@ class RoomsRepository {
 
   SupabaseClient get _client => SupabaseService.client;
 
+  String? get currentUserId => _client.auth.currentUser?.id;
+
   Future<List<Room>> fetchRooms({String? category}) async {
     final rows = await _client
         .from('voice_rooms')

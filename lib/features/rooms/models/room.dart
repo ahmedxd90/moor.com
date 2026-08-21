@@ -11,6 +11,7 @@ class Room {
     this.isLive = false,
     this.isLocked = false,
     this.country,
+    this.participantAvatars = const [],
   });
 
   final String id;
@@ -24,6 +25,7 @@ class Room {
   final bool isLive;
   final bool isLocked;
   final String? country;
+  final List<String> participantAvatars;
 
   factory Room.fromMap(Map<String, dynamic> map) {
     final metadata = map['metadata'] is Map
@@ -44,6 +46,11 @@ class Room {
       isLive: status == 'live' || metadata['is_live'] == true,
       isLocked: status == 'locked' || metadata['is_locked'] == true,
       country: map['country_code'] as String?,
+      participantAvatars: metadata['participant_avatars'] is List
+          ? (metadata['participant_avatars'] as List)
+                .whereType<String>()
+                .toList(growable: false)
+          : const [],
     );
   }
 }
