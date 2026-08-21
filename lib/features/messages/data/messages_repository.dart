@@ -14,6 +14,7 @@ class RoomMessage {
     this.authorName,
     this.authorAvatarUrl,
     this.type = 'text',
+    this.metadata = const {},
   });
 
   final String id;
@@ -24,11 +25,28 @@ class RoomMessage {
   final String? authorName;
   final String? authorAvatarUrl;
   final String type;
+  final Map<String, dynamic> metadata;
 
-  factory RoomMessage.fromMap(Map<String, dynamic> map) {
-    final profile = map['profiles'] is Map<String, dynamic>
-        ? map['profiles'] as Map<String, dynamic>
-        : null;
+  factory RoomMessage.fromMap(
+    Map<String, dynamic> map, {
+    Map<String, dynamic>? profile,
+  }) {
+    final rawMetadata = map['metadata'];
+    final metadata = rawMetadata is Map
+        ? Map<String, dynamic>.from(rawMetadata)
+        : const <String, dynamic>{};
+    final profileData = profile?['data'] is Map
+        ? Map<String, dynamic>.from(profile!['data'] as Map)
+        : const <String, dynamic>{};
+    final name =
+        (metadata['author_name'] as String?) ??
+        (profileData['fullName'] as String?) ??
+        (profileData['userName'] as String?) ??
+        profile?['display_name'] as String?;
+    final avatar =
+        (metadata['author_avatar_url'] as String?) ??
+        (profileData['avatarUrl'] as String?) ??
+        (profileData['avatar_url'] as String?);
     return RoomMessage(
       id: map['id'] as String,
       roomId: map['room_id'] as String,
@@ -37,9 +55,10 @@ class RoomMessage {
       createdAt:
           DateTime.tryParse(map['created_at'] as String? ?? '')?.toLocal() ??
           DateTime.now(),
-      type: (map['type'] as String?) ?? 'text',
-      authorName: profile?['name'] as String?,
-      authorAvatarUrl: profile?['avatar_url'] as String?,
+      type: (map['message_type'] as String?) ?? 'text',
+      metadata: metadata,
+      authorName: name,
+      authorAvatarUrl: avatar,
     );
   }
 }
@@ -52,20 +71,48 @@ class MessagesRepository {
   Future<List<RoomMessage>> fetchRoomMessages(String roomId) async {
     final rows = await _client
         .from('room_messages')
-        .select('*, profiles(name, avatar_url)')
+        .select('id,room_id,user_id,content,message_type,metadata,created_at')
         .eq('room_id', roomId)
         .order('created_at', ascending: true)
         .limit(100);
-    return (rows as List)
-        .cast<Map<String, dynamic>>()
-        .map(RoomMessage.fromMap)
-        .toList();
+    final maps = (rows as List).cast<Map<String, dynamic>>();
+    final profiles = await _profilesByUserIds(
+      maps.map((row) => row['user_id'] as String).toSet().toList(),
+    );
+    return maps
+        .map(
+          (row) => RoomMessage.fromMap(
+            row,
+            profile: profiles[row['user_id'] as String],
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  Future<Map<String, Map<String, dynamic>>> _profilesByUserIds(
+    List<String> userIds,
+  ) async {
+    if (userIds.isEmpty) return <String, Map<String, dynamic>>{};
+    try {
+      final rows = await _client
+          .from('user_profiles')
+          .select('auth_user_id,data')
+          .inFilter('auth_user_id', userIds)
+          .limit(100);
+      return {
+        for (final row in (rows as List).cast<Map<String, dynamic>>())
+          row['auth_user_id'] as String: row,
+      };
+    } catch (_) {
+      return <String, Map<String, dynamic>>{};
+    }
   }
 
   Future<void> sendRoomMessage({
     required String roomId,
     required String content,
     String type = 'text',
+    Map<String, dynamic>? metadata,
   }) async {
     final user = _client.auth.currentUser;
     if (user == null) throw const AuthException('يجب تسجيل الدخول');
@@ -75,7 +122,8 @@ class MessagesRepository {
       'room_id': roomId,
       'user_id': user.id,
       'content': trimmed,
-      'type': type,
+      'message_type': type,
+      'metadata': metadata ?? const <String, dynamic>{},
     });
   }
 

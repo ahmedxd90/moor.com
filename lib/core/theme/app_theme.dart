@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 class AppColors {
   const AppColors._();
@@ -38,9 +37,11 @@ class AppTheme {
       brightness: Brightness.light,
       colorScheme: scheme,
       scaffoldBackgroundColor: AppColors.background,
-      textTheme: GoogleFonts.tajawalTextTheme(
-        ThemeData.light().textTheme,
-      ).apply(bodyColor: AppColors.text, displayColor: AppColors.text),
+      textTheme: ThemeData.light().textTheme.apply(
+        fontFamily: 'Tajawal',
+        bodyColor: AppColors.text,
+        displayColor: AppColors.text,
+      ),
       visualDensity: VisualDensity.standard,
       appBarTheme: const AppBarTheme(
         backgroundColor: AppColors.surface,

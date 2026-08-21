@@ -13,6 +13,8 @@ class Room {
     this.isLocked = false,
     this.country,
     this.participantAvatars = const [],
+    this.seatCount = 10,
+    this.settings = const {},
   });
 
   final String id;
@@ -28,10 +30,43 @@ class Room {
   final bool isLocked;
   final String? country;
   final List<String> participantAvatars;
+  final int seatCount;
+  final Map<String, dynamic> settings;
+
+  bool get allowMemberMic => settings['allow_member_mic'] == true;
+
+  Room copyWith({
+    String? name,
+    String? description,
+    String? coverUrl,
+    int? seatCount,
+    Map<String, dynamic>? settings,
+  }) => Room(
+    id: id,
+    name: name ?? this.name,
+    ownerId: ownerId,
+    roomNumber: roomNumber,
+    description: description ?? this.description,
+    coverUrl: coverUrl ?? this.coverUrl,
+    roomTheme: roomTheme,
+    memberCount: memberCount,
+    likesCount: likesCount,
+    isLive: isLive,
+    isLocked: isLocked,
+    country: country,
+    participantAvatars: participantAvatars,
+    seatCount: seatCount ?? this.seatCount,
+    settings: settings ?? this.settings,
+  );
+  String get announcement => (settings['announcement'] as String?) ?? '';
+  int get memberFee => (settings['member_fee'] as num?)?.toInt() ?? 0;
 
   factory Room.fromMap(Map<String, dynamic> map) {
     final metadata = map['metadata'] is Map
         ? Map<String, dynamic>.from(map['metadata'] as Map)
+        : const <String, dynamic>{};
+    final settings = metadata['settings'] is Map
+        ? Map<String, dynamic>.from(metadata['settings'] as Map)
         : const <String, dynamic>{};
     final status = (map['status'] as String?) ?? 'open';
     return Room(
@@ -54,6 +89,124 @@ class Room {
                 .whereType<String>()
                 .toList(growable: false)
           : const [],
+      seatCount: (metadata['seat_count'] as num?)?.toInt() ?? 10,
+      settings: settings,
     );
   }
+}
+
+class RoomMember {
+  const RoomMember({
+    required this.userId,
+    this.seatIndex,
+    this.role = 'listener',
+    this.name = 'عضو',
+    this.avatarUrl,
+    this.sakiId,
+    this.joinedAt,
+    this.isMuted = false,
+    this.isSpeaking = false,
+  });
+
+  final String userId;
+  final int? seatIndex;
+  final String role;
+  final String name;
+  final String? avatarUrl;
+  final int? sakiId;
+  final DateTime? joinedAt;
+  final bool isMuted;
+  final bool isSpeaking;
+
+  bool get isOwner => role == 'owner' || role == 'host';
+  bool get isSpeaker => role == 'speaker' || role == 'host' || role == 'owner';
+
+  factory RoomMember.fromMap(
+    Map<String, dynamic> map, {
+    Map<String, dynamic>? profile,
+  }) {
+    final profileData = profile?['data'] is Map
+        ? Map<String, dynamic>.from(profile!['data'] as Map)
+        : const <String, dynamic>{};
+    final name =
+        (profileData['fullName'] as String?) ??
+        (profileData['userName'] as String?) ??
+        (profileData['name'] as String?) ??
+        'عضو';
+    final avatar =
+        (profileData['avatarUrl'] as String?) ??
+        (profileData['avatar_url'] as String?);
+    final sakiId = (profile?['saki_id'] as num?)?.toInt();
+    return RoomMember(
+      userId: map['user_id'] as String,
+      seatIndex: (map['seat_index'] as num?)?.toInt(),
+      role: (map['role'] as String?) ?? 'listener',
+      name: name,
+      avatarUrl: avatar,
+      sakiId: sakiId,
+      joinedAt: DateTime.tryParse(map['joined_at'] as String? ?? '')?.toLocal(),
+      isMuted: map['is_muted'] == true,
+      isSpeaking: map['is_speaking'] == true,
+    );
+  }
+}
+
+class RoomGift {
+  const RoomGift({
+    required this.id,
+    required this.roomId,
+    required this.senderId,
+    required this.giftType,
+    required this.quantity,
+    this.senderName,
+    this.createdAt,
+  });
+
+  final String id;
+  final String roomId;
+  final String senderId;
+  final String giftType;
+  final int quantity;
+  final String? senderName;
+  final DateTime? createdAt;
+
+  factory RoomGift.fromMap(Map<String, dynamic> map, {String? senderName}) =>
+      RoomGift(
+        id: map['id'] as String,
+        roomId: map['room_id'] as String,
+        senderId: map['sender_id'] as String,
+        giftType: (map['gift_type'] as String?) ?? 'rose',
+        quantity: (map['quantity'] as num?)?.toInt() ?? 1,
+        senderName: senderName,
+        createdAt: DateTime.tryParse(
+          map['created_at'] as String? ?? '',
+        )?.toLocal(),
+      );
+}
+
+class SeatReaction {
+  const SeatReaction({
+    required this.id,
+    required this.roomId,
+    required this.seatIndex,
+    required this.userId,
+    required this.reaction,
+    this.createdAt,
+  });
+
+  final String id;
+  final String roomId;
+  final int seatIndex;
+  final String userId;
+  final String reaction;
+  final DateTime? createdAt;
+
+  factory SeatReaction.fromMap(Map<String, dynamic> map) => SeatReaction(
+    id: map['id'] as String,
+    roomId: map['room_id'] as String,
+    seatIndex: (map['seat_index'] as num?)?.toInt() ?? 0,
+    userId: map['user_id'] as String,
+    reaction: (map['reaction'] as String?) ?? '❤️',
+    createdAt: DateTime.tryParse(map['created_at'] as String? ?? '')?.toLocal(),
+  );
 }
