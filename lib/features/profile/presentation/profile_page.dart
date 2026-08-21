@@ -4,6 +4,8 @@ import '../../../core/config/app_config.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/data/auth_repository.dart';
 import '../../auth/presentation/complete_profile_page.dart';
+import '../../wallet/data/wallet_repository.dart';
+import 'account_pages.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key, this.demoMode = false});
@@ -16,7 +18,9 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   final _auth = const AuthRepository();
+  final _walletRepository = const WalletRepository();
   Map<String, dynamic>? _profile;
+  WalletSnapshot _wallet = WalletSnapshot.empty;
   bool _loading = true;
 
   @override
@@ -45,8 +49,10 @@ class _ProfilePageState extends State<ProfilePage> {
     } else {
       try {
         _profile = await _auth.getMyProfile();
+        _wallet = await _walletRepository.fetchWallet();
       } catch (_) {
         _profile = null;
+        _wallet = WalletSnapshot.empty;
       }
     }
     if (mounted) setState(() => _loading = false);
@@ -60,11 +66,6 @@ class _ProfilePageState extends State<ProfilePage> {
     'userName',
     'name',
   ], fallback: 'مستخدم Saki');
-
-  String get _sakiId =>
-      _firstString(_profile ?? const {}, ['saki_id', 'sakiId']).isNotEmpty
-      ? _firstString(_profile ?? const {}, ['saki_id', 'sakiId'])
-      : _firstString(_data, ['saki_id', 'sakiId'], fallback: '—');
 
   String? get _avatarUrl {
     final value = _firstString(_data, ['avatarUrl', 'avatar_url']);
@@ -99,9 +100,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
   int get _wealthLevel =>
       _numberValue(_data, ['wealth_level', 'wealthLevel'], fallback: 1);
-
-  int get _charismaLevel =>
-      _numberValue(_data, ['charisma_level', 'charismaLevel'], fallback: 1);
 
   @override
   Widget build(BuildContext context) {
@@ -203,6 +201,8 @@ class _ProfilePageState extends State<ProfilePage> {
                 _buildIdentity(),
                 const SizedBox(height: 20),
                 _buildStats(),
+                const SizedBox(height: 10),
+                _buildWealthChip(),
                 const SizedBox(height: 16),
                 _buildActionGrid(),
                 const SizedBox(height: 16),
@@ -251,14 +251,6 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  'ID: $_sakiId',
-                  style: const TextStyle(
-                    color: AppColors.mutedText,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
                 const SizedBox(height: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -279,7 +271,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        '$_gemCount',
+                        '${widget.demoMode || !AppConfig.isConfigured ? _gemCount : _wallet.diamonds}',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 10,
@@ -326,6 +318,46 @@ class _ProfilePageState extends State<ProfilePage> {
             child: _Stat(value: '$_visitorsCount', label: 'زائر'),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildWealthChip() {
+    final level = widget.demoMode || !AppConfig.isConfigured
+        ? _wealthLevel
+        : _wallet.wealthLevel;
+    final spent = widget.demoMode || !AppConfig.isConfigured
+        ? 30000
+        : _wallet.lifetimeSpentGold;
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: _openLevel,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF7ED),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFFED7AA)),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.workspace_premium_rounded,
+              color: AppColors.primary,
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                'مستوى الثروة $level  •  أرسلت $spent عملة',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.text,
+                ),
+              ),
+            ),
+            const Icon(Icons.chevron_left_rounded, color: AppColors.primary),
+          ],
+        ),
       ),
     );
   }
@@ -466,20 +498,8 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   void _openWallet() {
-    _showDetails(
-      title: 'محفظتي',
-      icon: Icons.account_balance_wallet_rounded,
-      color: const Color(0xFFF59E0B),
-      children: [
-        _DetailValue(
-          label: 'العملات الذهبية',
-          value: '${_numberValue(_data, ['gold_coins', 'goldCoins'])}',
-        ),
-        _DetailValue(
-          label: 'الماس',
-          value: '${_numberValue(_data, ['diamonds'])}',
-        ),
-      ],
+    Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (_) => WalletPage(demoMode: widget.demoMode)),
     );
   }
 
@@ -493,14 +513,10 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   void _openLevel() {
-    _showDetails(
-      title: 'المستوى',
-      icon: Icons.layers_rounded,
-      color: const Color(0xFFA855F7),
-      children: [
-        _DetailValue(label: 'مستوى الثروة', value: '$_wealthLevel'),
-        _DetailValue(label: 'مستوى الكاريزما', value: '$_charismaLevel'),
-      ],
+    Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => WealthLevelPage(demoMode: widget.demoMode),
+      ),
     );
   }
 
@@ -523,12 +539,11 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   void _openSettings() {
-    _showDetails(
-      title: 'الإعدادات',
-      icon: Icons.settings_rounded,
-      color: const Color(0xFF6B7280),
-      message: 'إعدادات الخصوصية والإشعارات والحساب ستكون متاحة هنا.',
-      showSignOut: true,
+    Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) =>
+            AccountSettingsPage(profile: _profile, demoMode: widget.demoMode),
+      ),
     );
   }
 
@@ -884,35 +899,6 @@ class _MenuRow extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _DetailValue extends StatelessWidget {
-  const _DetailValue({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: AppColors.background,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Text(label, style: const TextStyle(color: AppColors.mutedText)),
-          const Spacer(),
-          Text(
-            value,
-            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
-          ),
-        ],
       ),
     );
   }
