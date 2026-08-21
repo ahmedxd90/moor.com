@@ -68,6 +68,30 @@ class MessagesRepository {
 
   SupabaseClient get _client => SupabaseService.client;
 
+  Future<void> _broadcastRoomEvent(String roomId, String event) async {
+    try {
+      final channel = _client.channel('room-events:$roomId');
+      final ready = Completer<void>();
+      channel.subscribe((status, error) {
+        if (status == RealtimeSubscribeStatus.subscribed &&
+            !ready.isCompleted) {
+          ready.complete();
+        } else if (status == RealtimeSubscribeStatus.channelError &&
+            !ready.isCompleted) {
+          ready.completeError(error ?? Exception('Realtime channel error'));
+        }
+      });
+      await ready.future.timeout(const Duration(seconds: 2));
+      await channel.sendBroadcastMessage(
+        event: event,
+        payload: <String, dynamic>{'room_id': roomId},
+      );
+      await _client.removeChannel(channel);
+    } catch (_) {
+      // Postgres changes remains the primary path; broadcast is a best-effort fallback.
+    }
+  }
+
   Future<List<RoomMessage>> fetchRoomMessages(String roomId) async {
     final rows = await _client
         .from('room_messages')
@@ -125,6 +149,7 @@ class MessagesRepository {
       'message_type': type,
       'metadata': metadata ?? const <String, dynamic>{},
     });
+    await _broadcastRoomEvent(roomId, 'message_changed');
   }
 
   Stream<List<RoomMessage>> watchRoomMessages(String roomId) async* {
@@ -140,6 +165,14 @@ class MessagesRepository {
           column: 'room_id',
           value: roomId,
         ),
+        callback: (_) async {
+          if (!controller.isClosed) {
+            controller.add(await fetchRoomMessages(roomId));
+          }
+        },
+      )
+      ..onBroadcast(
+        event: 'message_changed',
         callback: (_) async {
           if (!controller.isClosed) {
             controller.add(await fetchRoomMessages(roomId));

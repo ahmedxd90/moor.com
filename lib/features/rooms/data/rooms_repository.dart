@@ -15,6 +15,41 @@ class RoomsRepository {
 
   String? get currentUserId => _client.auth.currentUser?.id;
 
+  Future<void> _broadcast(
+    String topic,
+    String event,
+    Map<String, dynamic> payload,
+  ) async {
+    try {
+      final channel = _client.channel(topic);
+      final ready = Completer<void>();
+      channel.subscribe((status, error) {
+        if (status == RealtimeSubscribeStatus.subscribed &&
+            !ready.isCompleted) {
+          ready.complete();
+        } else if (status == RealtimeSubscribeStatus.channelError &&
+            !ready.isCompleted) {
+          ready.completeError(error ?? Exception('Realtime channel error'));
+        }
+      });
+      await ready.future.timeout(const Duration(seconds: 2));
+      await channel.sendBroadcastMessage(event: event, payload: payload);
+      await _client.removeChannel(channel);
+    } catch (_) {
+      // Broadcast is best effort; database writes remain authoritative.
+    }
+  }
+
+  Future<void> _broadcastRoomEvent(String roomId, String event) {
+    return _broadcast('room-events:$roomId', event, <String, dynamic>{
+      'room_id': roomId,
+    });
+  }
+
+  Future<void> _broadcastRoomsFeed() {
+    return _broadcast('rooms-feed', 'rooms_changed', const <String, dynamic>{});
+  }
+
   Future<List<Room>> fetchRooms({
     String? category,
     RoomFeed feed = RoomFeed.latest,
@@ -95,12 +130,14 @@ class RoomsRepository {
           .delete()
           .eq('room_id', roomId)
           .eq('user_id', userId);
+      await _broadcastRoomEvent(roomId, 'follow_changed');
       return false;
     }
     await _client.from('room_follows').insert({
       'room_id': roomId,
       'user_id': userId,
     });
+    await _broadcastRoomEvent(roomId, 'follow_changed');
     return true;
   }
 
@@ -121,6 +158,7 @@ class RoomsRepository {
         'last_visited_at': now,
         'visit_count': 1,
       });
+      await _broadcastRoomEvent(roomId, 'visit_changed');
       return;
     }
     final currentCount = (existing['visit_count'] as num?)?.toInt() ?? 0;
@@ -129,6 +167,7 @@ class RoomsRepository {
         .update({'last_visited_at': now, 'visit_count': currentCount + 1})
         .eq('room_id', roomId)
         .eq('user_id', userId);
+    await _broadcastRoomEvent(roomId, 'visit_changed');
   }
 
   Future<String> uploadRoomCover(
@@ -177,6 +216,7 @@ class RoomsRepository {
         })
         .select()
         .single();
+    await _broadcastRoomsFeed();
     return Room.fromMap(row);
   }
 
@@ -256,6 +296,14 @@ class RoomsRepository {
           }
         },
       )
+      ..onBroadcast(
+        event: 'member_changed',
+        callback: (_) async {
+          if (!controller.isClosed) {
+            controller.add(await fetchRoomMembers(roomId));
+          }
+        },
+      )
       ..subscribe();
     try {
       yield* controller.stream;
@@ -317,6 +365,7 @@ class RoomsRepository {
       'left_at': null,
     }, onConflict: 'room_id,user_id');
     await recordRoomVisit(roomId);
+    await _broadcastRoomEvent(roomId, 'member_changed');
   }
 
   Future<void> setSeat({
@@ -331,6 +380,7 @@ class RoomsRepository {
         .update({'seat_index': seatIndex})
         .eq('room_id', roomId)
         .eq('user_id', userId);
+    await _broadcastRoomEvent(roomId, 'member_changed');
   }
 
   Future<void> setMemberMuted({
@@ -345,6 +395,7 @@ class RoomsRepository {
         .update({'is_muted': muted})
         .eq('room_id', roomId)
         .eq('user_id', userId);
+    await _broadcastRoomEvent(roomId, 'member_changed');
   }
 
   Future<void> sendGift({
@@ -362,6 +413,7 @@ class RoomsRepository {
       'gift_type': giftType,
       'quantity': quantity,
     });
+    await _broadcastRoomEvent(roomId, 'gift_changed');
   }
 
   Stream<List<RoomGift>> watchGifts(String roomId) async* {
@@ -396,6 +448,12 @@ class RoomsRepository {
           if (!controller.isClosed) controller.add(await fetch());
         },
       )
+      ..onBroadcast(
+        event: 'gift_changed',
+        callback: (_) async {
+          if (!controller.isClosed) controller.add(await fetch());
+        },
+      )
       ..subscribe();
     try {
       yield* controller.stream;
@@ -418,6 +476,7 @@ class RoomsRepository {
       'user_id': user.id,
       'reaction': reaction,
     });
+    await _broadcastRoomEvent(roomId, 'seat_reaction_changed');
   }
 
   Stream<List<SeatReaction>> watchSeatReactions(String roomId) async* {
@@ -446,6 +505,12 @@ class RoomsRepository {
           column: 'room_id',
           value: roomId,
         ),
+        callback: (_) async {
+          if (!controller.isClosed) controller.add(await fetch());
+        },
+      )
+      ..onBroadcast(
+        event: 'seat_reaction_changed',
         callback: (_) async {
           if (!controller.isClosed) controller.add(await fetch());
         },
@@ -481,6 +546,8 @@ class RoomsRepository {
         .update({'metadata': metadata})
         .eq('id', room.id)
         .eq('owner_id', user.id);
+    await _broadcastRoomEvent(room.id, 'room_changed');
+    await _broadcastRoomsFeed();
   }
 
   Future<void> updateRoomName({
@@ -496,6 +563,8 @@ class RoomsRepository {
         .update({'name': name.trim()})
         .eq('id', room.id)
         .eq('owner_id', user.id);
+    await _broadcastRoomEvent(room.id, 'room_changed');
+    await _broadcastRoomsFeed();
   }
 
   Future<void> leaveRoom(String roomId) async {
@@ -506,6 +575,7 @@ class RoomsRepository {
         .update({'left_at': DateTime.now().toUtc().toIso8601String()})
         .eq('room_id', roomId)
         .eq('user_id', user.id);
+    await _broadcastRoomEvent(roomId, 'member_changed');
   }
 
   Stream<List<Room>> watchRooms({
@@ -519,6 +589,14 @@ class RoomsRepository {
         event: PostgresChangeEvent.all,
         schema: 'public',
         table: 'voice_rooms',
+        callback: (_) async {
+          if (!controller.isClosed) {
+            controller.add(await fetchRooms(feed: feed, onlyMine: onlyMine));
+          }
+        },
+      )
+      ..onBroadcast(
+        event: 'rooms_changed',
         callback: (_) async {
           if (!controller.isClosed) {
             controller.add(await fetchRooms(feed: feed, onlyMine: onlyMine));
