@@ -1,0 +1,12 @@
+flutter_launcher_icons:
+  android: true
+  ios: true
+  web:
+    generate: true
+    image_path: assets/images/saki-icon.png
+    background_color: "#0F0F1A"
+    theme_color: "#A855F7"
+  image_path: assets/images/saki-icon.png
+  adaptive_icon_background: "#0F0F1A"
+  adaptive_icon_foreground: assets/images/saki-icon.png
+  remove_alpha_ios: true
