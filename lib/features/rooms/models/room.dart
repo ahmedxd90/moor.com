@@ -3,6 +3,7 @@ class Room {
     required this.id,
     required this.name,
     required this.ownerId,
+    this.roomNumber,
     this.description,
     this.coverUrl,
     this.roomTheme = 'music',
@@ -17,6 +18,7 @@ class Room {
   final String id;
   final String name;
   final String ownerId;
+  final int? roomNumber;
   final String? description;
   final String? coverUrl;
   final String roomTheme;
@@ -36,6 +38,7 @@ class Room {
       id: map['id'] as String,
       name: (map['name'] as String?) ?? 'غرفة بدون اسم',
       ownerId: map['owner_id'] as String,
+      roomNumber: (map['room_id'] as num?)?.toInt(),
       description:
           (metadata['description'] as String?) ??
           (metadata['notice'] as String?),

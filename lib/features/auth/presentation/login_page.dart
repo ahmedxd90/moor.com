@@ -189,11 +189,15 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF16121F),
+      resizeToAvoidBottomInset: true,
       body: Stack(
         fit: StackFit.expand,
         children: [
-          _buildVideoBackground(),
-          Container(color: Colors.black.withValues(alpha: .60)),
+          Positioned.fill(child: _buildVideoBackground()),
+          Positioned.fill(
+            child: Container(color: Colors.black.withValues(alpha: .60)),
+          ),
           SafeArea(
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -208,9 +212,9 @@ class _LoginPageState extends State<LoginPage> {
                     child: Column(
                       children: [
                         _buildBrandHeader(),
-                        const Spacer(),
+                        const SizedBox(height: 34),
                         _buildLoginForm(),
-                        const Spacer(),
+                        const SizedBox(height: 22),
                         _buildSignupFooter(),
                       ],
                     ),
@@ -230,12 +234,15 @@ class _LoginPageState extends State<LoginPage> {
       builder: (context, snapshot) {
         if (_videoController.value.isInitialized) {
           final videoSize = _videoController.value.size;
-          return FittedBox(
-            fit: BoxFit.cover,
-            child: SizedBox(
-              width: videoSize.width,
-              height: videoSize.height,
-              child: VideoPlayer(_videoController),
+          return SizedBox.expand(
+            child: FittedBox(
+              fit: BoxFit.cover,
+              clipBehavior: Clip.hardEdge,
+              child: SizedBox(
+                width: videoSize.width,
+                height: videoSize.height,
+                child: VideoPlayer(_videoController),
+              ),
             ),
           );
         }
