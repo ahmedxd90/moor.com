@@ -79,10 +79,11 @@ class _LoginPageState extends State<LoginPage> {
       }
     } catch (error) {
       if (mounted) {
-        _show(
-          error.toString().replaceFirst('AuthException: ', ''),
-          error: true,
-        );
+        if (_isExistingUserError(error)) {
+          _showExistingAccountMessage();
+        } else {
+          _show(_friendlyError(error), error: true);
+        }
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -93,7 +94,7 @@ class _LoginPageState extends State<LoginPage> {
     try {
       await _auth.signInWithGoogle();
     } catch (error) {
-      if (mounted) _show(error.toString(), error: true);
+      if (mounted) _show(_friendlyError(error), error: true);
     }
   }
 
@@ -104,6 +105,85 @@ class _LoginPageState extends State<LoginPage> {
         backgroundColor: error ? AppColors.danger : AppColors.success,
       ),
     );
+  }
+
+  bool _isExistingUserError(Object error) {
+    final normalized = error.toString().toLowerCase();
+    return normalized.contains('user_already_exists') ||
+        normalized.contains('user already registered');
+  }
+
+  void _showExistingAccountMessage() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text(
+          'هذا البريد الإلكتروني مسجل مسبقًا. استخدم تسجيل الدخول أو استعادة كلمة المرور.',
+        ),
+        backgroundColor: AppColors.danger,
+        action: SnackBarAction(
+          label: 'تسجيل الدخول',
+          textColor: Colors.white,
+          onPressed: () => setState(() => _register = false),
+        ),
+      ),
+    );
+  }
+
+  String _friendlyError(Object error) {
+    final raw = error.toString();
+    final normalized = raw.toLowerCase();
+    if (normalized.contains('invalid login credentials')) {
+      return 'البريد الإلكتروني أو كلمة المرور غير صحيحة.';
+    }
+    if (normalized.contains('email not confirmed')) {
+      return 'يرجى تأكيد بريدك الإلكتروني أولًا ثم حاول تسجيل الدخول.';
+    }
+    if (normalized.contains('password should be at least')) {
+      return 'يجب أن تتكون كلمة المرور من 6 أحرف على الأقل.';
+    }
+    if (normalized.contains('email rate limit')) {
+      return 'تم تجاوز عدد المحاولات. حاول بعد قليل.';
+    }
+    return raw
+        .replaceFirst('AuthException: ', '')
+        .replaceFirst('AuthApiException: ', '');
+  }
+
+  Future<void> _showResetDialog() async {
+    final controller = TextEditingController(text: _email.text.trim());
+    final email = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('استعادة كلمة المرور'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.emailAddress,
+          textDirection: TextDirection.ltr,
+          decoration: const InputDecoration(labelText: 'البريد الإلكتروني'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: const Text('إرسال الرابط'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (email == null || email.trim().isEmpty || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await _auth.sendPasswordReset(email: email);
+      if (mounted) _show('تم إرسال رابط استعادة كلمة المرور إلى بريدك.');
+    } catch (error) {
+      if (mounted) _show(_friendlyError(error), error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -281,6 +361,26 @@ class _LoginPageState extends State<LoginPage> {
                 ? 'كلمة المرور ستة أحرف على الأقل'
                 : null,
           ),
+          if (!_register)
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: TextButton(
+                onPressed: _busy ? null : _showResetDialog,
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text(
+                  'نسيت كلمة المرور؟',
+                  style: TextStyle(
+                    color: AppColors.secondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
           const SizedBox(height: 18),
           SizedBox(
             width: double.infinity,

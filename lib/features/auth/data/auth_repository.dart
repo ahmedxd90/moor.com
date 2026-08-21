@@ -50,6 +50,13 @@ class AuthRepository {
     );
   }
 
+  Future<void> sendPasswordReset({required String email}) {
+    return _client.auth.resetPasswordForEmail(
+      email.trim(),
+      redirectTo: _authRedirectUrl,
+    );
+  }
+
   Future<void> signOut() => _client.auth.signOut();
 
   Future<Map<String, dynamic>?> getMyProfile() async {
