@@ -57,7 +57,9 @@ class AuthRepository {
     if (user == null) return null;
     return _client
         .from('user_profiles')
-        .select('id, auth_user_id, data, phone_number, created_at, updated_at')
+        .select(
+          'id, auth_user_id, saki_id, data, phone_number, created_at, updated_at',
+        )
         .eq('auth_user_id', user.id)
         .maybeSingle();
   }
@@ -72,10 +74,12 @@ class AuthRepository {
     final nickname = (data['nickname'] as String?)?.trim() ?? '';
     final userName = (data['userName'] as String?)?.trim() ?? '';
     final gender = (data['gender'] as String?)?.trim() ?? '';
+    final countryCode = (data['countryCode'] as String?)?.trim() ?? '';
     return fullName.isNotEmpty &&
         nickname.isNotEmpty &&
         userName.isNotEmpty &&
-        gender.isNotEmpty;
+        gender.isNotEmpty &&
+        countryCode.isNotEmpty;
   }
 
   Map<String, dynamic> profileData(Map<String, dynamic>? profile) {
@@ -83,7 +87,27 @@ class AuthRepository {
     return raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
   }
 
-  Future<void> saveMyProfile({
+  Future<String> uploadAvatar(
+    Uint8List bytes, {
+    required String fileName,
+  }) async {
+    final user = currentUser;
+    if (user == null) throw const AuthException('يجب تسجيل الدخول أولًا');
+    final path = '${user.id}/$fileName';
+    await _client.storage
+        .from('user-media')
+        .uploadBinary(
+          path,
+          bytes,
+          fileOptions: const FileOptions(
+            upsert: true,
+            contentType: 'image/jpeg',
+          ),
+        );
+    return _client.storage.from('user-media').getPublicUrl(path);
+  }
+
+  Future<int> saveMyProfile({
     required String fullName,
     required String nickname,
     required String userName,
@@ -91,10 +115,14 @@ class AuthRepository {
     required String countryCode,
     required String about,
     required List<String> interests,
+    String? avatarUrl,
   }) async {
     final user = currentUser;
     if (user == null) throw const AuthException('يجب تسجيل الدخول أولًا');
+    final existing = await getMyProfile();
+    final existingData = profileData(existing);
     final data = {
+      ...existingData,
       'id': user.id,
       'userId': user.id,
       'email': user.email,
@@ -105,21 +133,25 @@ class AuthRepository {
       'countryCode': countryCode,
       'about': about.trim(),
       'interests': interests,
-      'followers': <String>[],
-      'following': <String>[],
-      'favSongs': <String>[],
-      'favTeels': <String>[],
+      'followers': existingData['followers'] ?? <String>[],
+      'following': existingData['following'] ?? <String>[],
+      'favSongs': existingData['favSongs'] ?? <String>[],
+      'favTeels': existingData['favTeels'] ?? <String>[],
       'isOnline': true,
-      'isVerified': false,
-      'isPremium': false,
-      'profileCategoryName': 'New',
-      'createdAt': DateTime.now().millisecondsSinceEpoch,
+      'isVerified': existingData['isVerified'] ?? false,
+      'isPremium': existingData['isPremium'] ?? false,
+      'profileCategoryName': existingData['profileCategoryName'] ?? 'New',
+      'createdAt':
+          existingData['createdAt'] ?? DateTime.now().millisecondsSinceEpoch,
+      if (avatarUrl != null && avatarUrl.isNotEmpty) 'avatarUrl': avatarUrl,
     };
     await _client.from('user_profiles').upsert({
       'auth_user_id': user.id,
       'phone_number': user.phone,
       'data': data,
     }, onConflict: 'auth_user_id');
+    final generated = await _client.rpc('ensure_my_saki_id');
+    return (generated as num).toInt();
   }
 
   Future<void> updateMyProfile(Map<String, dynamic> values) async {

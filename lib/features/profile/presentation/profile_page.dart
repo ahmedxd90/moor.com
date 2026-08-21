@@ -63,12 +63,19 @@ class _ProfilePageState extends State<ProfilePage> {
         child: CircularProgressIndicator(color: AppColors.primary),
       );
     }
-    final profile = _auth.profileData(_profile);
+    final nestedProfile = _auth.profileData(_profile);
+    final profile = nestedProfile.isNotEmpty ? nestedProfile : (_profile ?? {});
     final name =
         (profile['fullName'] as String?) ??
         (profile['nickname'] as String?) ??
         'مستخدم Saki';
-    final sakiId = (profile['userName'] as String?) ?? '—';
+    final sakiId =
+        _profile?['saki_id']?.toString() ??
+        profile['saki_id']?.toString() ??
+        profile['userName']?.toString() ??
+        '—';
+    final avatarUrl =
+        profile['avatarUrl'] as String? ?? profile['avatar_url'] as String?;
     return Scaffold(
       appBar: AppBar(
         title: const Text(
@@ -101,11 +108,7 @@ class _ProfilePageState extends State<ProfilePage> {
               ),
               child: Column(
                 children: [
-                  SakiAvatar(
-                    name: name,
-                    url: profile['avatar_url'] as String?,
-                    size: 82,
-                  ),
+                  SakiAvatar(name: name, url: avatarUrl, size: 82),
                   const SizedBox(height: 11),
                   Text(
                     name,

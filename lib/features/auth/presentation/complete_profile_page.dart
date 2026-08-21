@@ -1,8 +1,13 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../data/auth_repository.dart';
+import '../data/countries.dart';
+import 'country_picker_page.dart';
 
 class CompleteProfilePage extends StatefulWidget {
   const CompleteProfilePage({
@@ -20,13 +25,16 @@ class CompleteProfilePage extends StatefulWidget {
 
 class _CompleteProfilePageState extends State<CompleteProfilePage> {
   final _auth = const AuthRepository();
+  final _picker = ImagePicker();
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _fullName;
   late final TextEditingController _nickname;
   late final TextEditingController _userName;
   late final TextEditingController _about;
-  String _gender = 'singleOtherMen';
+  String _gender = 'male';
   String _countryCode = 'SA';
+  String? _avatarUrl;
+  Uint8List? _avatarBytes;
   bool _busy = false;
   final _interests = <String>{};
   final _availableInterests = const [
@@ -48,13 +56,24 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
     _nickname = TextEditingController(text: data['nickname'] as String? ?? '');
     _userName = TextEditingController(text: data['userName'] as String? ?? '');
     _about = TextEditingController(text: data['about'] as String? ?? '');
-    _gender = data['gender'] as String? ?? _gender;
+    _gender = _normalizeGender(data['gender'] as String?);
     _countryCode = data['countryCode'] as String? ?? _countryCode;
+    _avatarUrl = data['avatarUrl'] as String?;
     final savedInterests = data['interests'];
     if (savedInterests is List) {
       _interests.addAll(savedInterests.whereType<String>());
     }
   }
+
+  String _normalizeGender(String? value) => switch (value) {
+    'singleOtherWomen' || 'marriedStraightWomen' || 'female' => 'female',
+    _ => 'male',
+  };
+
+  CountryOption get _selectedCountry => worldCountries.firstWhere(
+    (country) => country.code == _countryCode,
+    orElse: () => const CountryOption('SA', 'السعودية'),
+  );
 
   @override
   void dispose() {
@@ -65,11 +84,42 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
     super.dispose();
   }
 
+  Future<void> _pickAvatar() async {
+    final image = await _picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 900,
+      maxHeight: 900,
+      imageQuality: 86,
+    );
+    if (image == null) return;
+    final bytes = await image.readAsBytes();
+    if (!mounted) return;
+    setState(() => _avatarBytes = bytes);
+  }
+
+  Future<void> _chooseCountry() async {
+    final selected = await Navigator.of(context).push<CountryOption>(
+      MaterialPageRoute(
+        builder: (_) => CountryPickerPage(initialCode: _countryCode),
+      ),
+    );
+    if (selected != null && mounted) {
+      setState(() => _countryCode = selected.code);
+    }
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _busy = true);
     try {
-      await _auth.saveMyProfile(
+      var avatarUrl = _avatarUrl;
+      if (_avatarBytes != null) {
+        avatarUrl = await _auth.uploadAvatar(
+          _avatarBytes!,
+          fileName: 'avatar-${DateTime.now().millisecondsSinceEpoch}.jpg',
+        );
+      }
+      final sakiId = await _auth.saveMyProfile(
         fullName: _fullName.text,
         nickname: _nickname.text,
         userName: _userName.text,
@@ -77,8 +127,16 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
         countryCode: _countryCode,
         about: _about.text,
         interests: _interests.toList(),
+        avatarUrl: avatarUrl,
       );
-      if (mounted) widget.onCompleted();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تم حفظ ملفك. Saki ID الخاص بك: $sakiId'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+      widget.onCompleted();
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -108,6 +166,8 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
             children: [
+              _buildAvatarCard(),
+              const SizedBox(height: 20),
               Container(
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
@@ -147,6 +207,7 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
               const SizedBox(height: 12),
               TextFormField(
                 controller: _fullName,
+                textInputAction: TextInputAction.next,
                 decoration: const InputDecoration(
                   labelText: 'الاسم الكامل',
                   prefixIcon: Icon(Icons.person_outline),
@@ -158,20 +219,23 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
               const SizedBox(height: 13),
               TextFormField(
                 controller: _nickname,
+                textInputAction: TextInputAction.next,
                 decoration: const InputDecoration(
-                  labelText: 'الاسم المستعار',
+                  labelText: 'الاسم الظاهر',
                   prefixIcon: Icon(Icons.badge_outlined),
                 ),
                 validator: (value) => value == null || value.trim().length < 2
-                    ? 'أدخل اسمًا مستعارًا'
+                    ? 'أدخل اسمًا ظاهرًا'
                     : null,
               ),
               const SizedBox(height: 13),
               TextFormField(
                 controller: _userName,
                 textDirection: TextDirection.ltr,
+                textInputAction: TextInputAction.next,
                 decoration: const InputDecoration(
                   labelText: 'اسم المستخدم',
+                  hintText: 'saki_user',
                   prefixIcon: Icon(Icons.alternate_email),
                 ),
                 validator: (value) {
@@ -185,44 +249,31 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
               DropdownButtonFormField<String>(
                 initialValue: _gender,
                 decoration: const InputDecoration(
-                  labelText: 'النوع والتفضيل',
+                  labelText: 'الجنس',
                   prefixIcon: Icon(Icons.people_outline),
                 ),
                 items: const [
-                  DropdownMenuItem(value: 'singleOtherMen', child: Text('رجل')),
-                  DropdownMenuItem(
-                    value: 'singleOtherWomen',
-                    child: Text('امرأة'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'marriedStraightMen',
-                    child: Text('رجل متزوج'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'marriedStraightWomen',
-                    child: Text('امرأة متزوجة'),
-                  ),
+                  DropdownMenuItem(value: 'male', child: Text('ذكر')),
+                  DropdownMenuItem(value: 'female', child: Text('أنثى')),
                 ],
                 onChanged: (value) =>
                     setState(() => _gender = value ?? _gender),
               ),
               const SizedBox(height: 13),
-              DropdownButtonFormField<String>(
-                initialValue: _countryCode,
-                decoration: const InputDecoration(
-                  labelText: 'الدولة',
-                  prefixIcon: Icon(Icons.public),
+              InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: _chooseCountry,
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'الدولة',
+                    prefixIcon: Icon(Icons.public),
+                    suffixIcon: Icon(Icons.chevron_left),
+                  ),
+                  child: Text(
+                    _selectedCountry.name,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
                 ),
-                items: const [
-                  DropdownMenuItem(value: 'SA', child: Text('السعودية')),
-                  DropdownMenuItem(value: 'AE', child: Text('الإمارات')),
-                  DropdownMenuItem(value: 'KW', child: Text('الكويت')),
-                  DropdownMenuItem(value: 'QA', child: Text('قطر')),
-                  DropdownMenuItem(value: 'EG', child: Text('مصر')),
-                  DropdownMenuItem(value: 'JO', child: Text('الأردن')),
-                ],
-                onChanged: (value) =>
-                    setState(() => _countryCode = value ?? _countryCode),
               ),
               const SizedBox(height: 13),
               TextFormField(
@@ -266,7 +317,16 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
                     )
                     .toList(),
               ),
-              const SizedBox(height: 26),
+              const SizedBox(height: 18),
+              Text(
+                'سيتم إنشاء Saki ID فريد من 9 أرقام وحفظه تلقائيًا عند الحفظ.',
+                style: TextStyle(
+                  color: AppColors.mutedText.withValues(alpha: .9),
+                  fontSize: 12,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
               SakiGradientButton(
                 label: 'حفظ ومتابعة',
                 icon: Icons.arrow_back,
@@ -276,6 +336,65 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildAvatarCard() {
+    final image = _avatarBytes == null && _avatarUrl == null
+        ? const Icon(Icons.person, size: 42, color: AppColors.mutedText)
+        : ClipOval(
+            child: _avatarBytes != null
+                ? Image.memory(_avatarBytes!, fit: BoxFit.cover)
+                : Image.network(_avatarUrl!, fit: BoxFit.cover),
+          );
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 84,
+            height: 84,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: .14),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: AppColors.primary.withValues(alpha: .55),
+                width: 2,
+              ),
+            ),
+            child: image,
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'صورة المستخدم',
+                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                ),
+                const SizedBox(height: 5),
+                const Text(
+                  'أضف صورة تظهر لأصدقائك داخل Saki Chat.',
+                  style: TextStyle(color: AppColors.mutedText, fontSize: 12),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _pickAvatar,
+                  icon: const Icon(Icons.photo_library_outlined, size: 18),
+                  label: const Text('اختيار صورة'),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
