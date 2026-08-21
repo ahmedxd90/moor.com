@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/config/app_config.dart';
@@ -30,14 +31,22 @@ class AuthRepository {
     return _client.auth.signUp(
       email: email.trim(),
       password: password,
+      emailRedirectTo: _authRedirectUrl,
       data: {'name': name.trim()},
     );
+  }
+
+  String get _authRedirectUrl {
+    if (AppConfig.authRedirectOverride.isNotEmpty) {
+      return AppConfig.authRedirectOverride;
+    }
+    return kIsWeb ? Uri.base.origin : 'saki.chat.co://login-callback';
   }
 
   Future<void> signInWithGoogle() async {
     await _client.auth.signInWithOAuth(
       OAuthProvider.google,
-      redirectTo: 'saki.chat.co://login-callback',
+      redirectTo: _authRedirectUrl,
     );
   }
 

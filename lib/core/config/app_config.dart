@@ -14,6 +14,10 @@ class AppConfig {
   static const appName = 'Saki Chat';
   static const appVersion = '1.0.0';
   static const androidPackage = 'saki.chat.co';
+  static const authRedirectOverride = String.fromEnvironment(
+    'SUPABASE_AUTH_REDIRECT',
+    defaultValue: '',
+  );
 
   static bool get isConfigured =>
       supabaseUrl.startsWith('https://') &&
