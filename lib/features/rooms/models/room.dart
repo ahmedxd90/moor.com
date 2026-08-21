@@ -119,7 +119,7 @@ class RoomMember {
   final bool isSpeaking;
 
   bool get isOwner => role == 'owner' || role == 'host';
-  bool get isSpeaker => role == 'speaker' || role == 'host' || role == 'owner';
+  bool get isSpeaker => seatIndex != null;
 
   factory RoomMember.fromMap(
     Map<String, dynamic> map, {
@@ -159,6 +159,8 @@ class RoomGift {
     required this.giftType,
     required this.quantity,
     this.senderName,
+    this.receiverId,
+    this.unitPrice = 0,
     this.createdAt,
   });
 
@@ -168,6 +170,8 @@ class RoomGift {
   final String giftType;
   final int quantity;
   final String? senderName;
+  final String? receiverId;
+  final int unitPrice;
   final DateTime? createdAt;
 
   factory RoomGift.fromMap(Map<String, dynamic> map, {String? senderName}) =>
@@ -178,10 +182,81 @@ class RoomGift {
         giftType: (map['gift_type'] as String?) ?? 'rose',
         quantity: (map['quantity'] as num?)?.toInt() ?? 1,
         senderName: senderName,
+        receiverId: map['receiver_id'] as String?,
+        unitPrice: (map['unit_price'] as num?)?.toInt() ?? 0,
         createdAt: DateTime.tryParse(
           map['created_at'] as String? ?? '',
         )?.toLocal(),
       );
+}
+
+class GiftCatalogItem {
+  const GiftCatalogItem({
+    required this.giftType,
+    required this.displayName,
+    required this.category,
+    required this.price,
+    required this.emoji,
+    this.assetUrl,
+  });
+
+  final String giftType;
+  final String displayName;
+  final String category;
+  final int price;
+  final String emoji;
+  final String? assetUrl;
+
+  factory GiftCatalogItem.fromMap(Map<String, dynamic> map) {
+    return GiftCatalogItem(
+      giftType: map['gift_type'] as String,
+      displayName: (map['display_name'] as String?) ?? 'هدية',
+      category: (map['category'] as String?) ?? 'general',
+      price: (map['price'] as num?)?.toInt() ?? 1,
+      emoji: (map['emoji'] as String?) ?? '🎁',
+      assetUrl: map['asset_url'] as String?,
+    );
+  }
+}
+
+class GiftRankingEntry {
+  const GiftRankingEntry({
+    required this.rank,
+    required this.userId,
+    required this.totalCoins,
+    required this.totalGifts,
+    this.name,
+    this.avatarUrl,
+    this.sakiId,
+  });
+
+  final int rank;
+  final String userId;
+  final int totalCoins;
+  final int totalGifts;
+  final String? name;
+  final String? avatarUrl;
+  final int? sakiId;
+
+  GiftRankingEntry copyWithProfile(Map<String, dynamic>? profile) {
+    if (profile == null) return this;
+    final data = profile['data'] is Map
+        ? Map<String, dynamic>.from(profile['data'] as Map)
+        : const <String, dynamic>{};
+    return GiftRankingEntry(
+      rank: rank,
+      userId: userId,
+      totalCoins: totalCoins,
+      totalGifts: totalGifts,
+      name:
+          (data['fullName'] as String?) ??
+          (data['userName'] as String?) ??
+          (data['name'] as String?),
+      avatarUrl:
+          (data['avatarUrl'] as String?) ?? (data['avatar_url'] as String?),
+      sakiId: (profile['saki_id'] as num?)?.toInt(),
+    );
+  }
 }
 
 class SeatReaction {

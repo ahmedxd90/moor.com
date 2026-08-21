@@ -313,24 +313,6 @@ class RoomsRepository {
     }
   }
 
-  Future<int> _nextSeatIndex(String roomId, {int seatCount = 10}) async {
-    final rows = await _client
-        .from('voice_room_members')
-        .select('seat_index')
-        .eq('room_id', roomId)
-        .isFilter('left_at', null)
-        .limit(50);
-    final occupied = (rows as List)
-        .map((row) => (row as Map<String, dynamic>)['seat_index'])
-        .whereType<num>()
-        .map((value) => value.toInt())
-        .toSet();
-    for (var index = 0; index < seatCount; index++) {
-      if (!occupied.contains(index)) return index;
-    }
-    return -1;
-  }
-
   Future<void> joinRoom(String roomId) async {
     final user = _client.auth.currentUser;
     if (user == null) throw const AuthException('يجب تسجيل الدخول');
@@ -339,10 +321,6 @@ class RoomsRepository {
         .select('owner_id,metadata')
         .eq('id', roomId)
         .single();
-    final metadata = room['metadata'] is Map
-        ? Map<String, dynamic>.from(room['metadata'] as Map)
-        : const <String, dynamic>{};
-    final seatCount = (metadata['seat_count'] as num?)?.toInt() ?? 10;
     final existing = await _client
         .from('voice_room_members')
         .select('seat_index,left_at')
@@ -350,11 +328,9 @@ class RoomsRepository {
         .eq('user_id', user.id)
         .maybeSingle();
     final existingSeat = (existing?['seat_index'] as num?)?.toInt();
-    final seatIndex =
-        existing != null && existing['left_at'] == null && existingSeat != null
+    final seatIndex = existing != null && existing['left_at'] == null
         ? existingSeat
-        : await _nextSeatIndex(roomId, seatCount: seatCount);
-    if (seatIndex < 0) throw const AuthException('الغرفة ممتلئة حاليًا');
+        : null;
     await _client.from('voice_room_members').upsert({
       'room_id': roomId,
       'user_id': user.id,
@@ -398,6 +374,55 @@ class RoomsRepository {
     await _broadcastRoomEvent(roomId, 'member_changed');
   }
 
+  Future<List<GiftCatalogItem>> fetchGiftCatalog() async {
+    final rows = await _client
+        .from('room_gift_catalog')
+        .select('gift_type,display_name,category,price,emoji,asset_url')
+        .eq('is_active', true)
+        .order('price', ascending: true);
+    return (rows as List)
+        .cast<Map<String, dynamic>>()
+        .map(GiftCatalogItem.fromMap)
+        .toList(growable: false);
+  }
+
+  Future<int> fetchMyGoldCoins() async {
+    final rows = await _client.rpc('get_my_wallet');
+    if (rows is List && rows.isNotEmpty) {
+      return ((rows.first as Map<String, dynamic>)['gold_coins'] as num?)
+              ?.toInt() ??
+          0;
+    }
+    return 0;
+  }
+
+  Future<List<GiftRankingEntry>> fetchGiftRankings({
+    required String roomId,
+    required String period,
+  }) async {
+    final rows = await _client.rpc(
+      'room_gift_rankings',
+      params: {'p_room_id': roomId, 'p_period': period},
+    );
+    final entries = (rows as List)
+        .cast<Map<String, dynamic>>()
+        .map(
+          (row) => GiftRankingEntry(
+            rank: (row['rank'] as num?)?.toInt() ?? 0,
+            userId: row['user_id'] as String,
+            totalCoins: (row['total_coins'] as num?)?.toInt() ?? 0,
+            totalGifts: (row['total_gifts'] as num?)?.toInt() ?? 0,
+          ),
+        )
+        .toList(growable: false);
+    final profiles = await _profilesByUserIds(
+      entries.map((entry) => entry.userId).toSet().toList(),
+    );
+    return entries
+        .map((entry) => entry.copyWithProfile(profiles[entry.userId]))
+        .toList(growable: false);
+  }
+
   Future<void> sendGift({
     required String roomId,
     required String giftType,
@@ -406,13 +431,15 @@ class RoomsRepository {
   }) async {
     final user = _client.auth.currentUser;
     if (user == null) throw const AuthException('يجب تسجيل الدخول لإرسال هدية');
-    await _client.from('room_gifts').insert({
-      'room_id': roomId,
-      'sender_id': user.id,
-      'receiver_id': receiverId,
-      'gift_type': giftType,
-      'quantity': quantity,
-    });
+    await _client.rpc(
+      'send_room_gift',
+      params: {
+        'p_room_id': roomId,
+        'p_receiver_id': receiverId,
+        'p_gift_type': giftType,
+        'p_quantity': quantity,
+      },
+    );
     await _broadcastRoomEvent(roomId, 'gift_changed');
   }
 
