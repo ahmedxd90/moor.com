@@ -71,6 +71,23 @@ class AuthRepository {
         .maybeSingle();
   }
 
+  Future<Map<String, int>> getMyProfileStats() async {
+    final user = currentUser;
+    if (user == null) return const {};
+    final followingRows = await _client
+        .from('user_follows')
+        .select('following_id')
+        .eq('follower_id', user.id);
+    final followersRows = await _client
+        .from('user_follows')
+        .select('follower_id')
+        .eq('following_id', user.id);
+    return {
+      'following': (followingRows as List).length,
+      'followers': (followersRows as List).length,
+    };
+  }
+
   bool isProfileComplete(Map<String, dynamic>? profile) {
     if (profile == null) return false;
     final raw = profile['data'];

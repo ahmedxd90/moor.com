@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/config/app_config.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/data/auth_repository.dart';
+import '../../auth/data/countries.dart';
 import '../../auth/presentation/complete_profile_page.dart';
 import '../../wallet/data/wallet_repository.dart';
 import 'account_pages.dart';
@@ -21,7 +22,10 @@ class _ProfilePageState extends State<ProfilePage> {
   final _walletRepository = const WalletRepository();
   Map<String, dynamic>? _profile;
   WalletSnapshot _wallet = WalletSnapshot.empty;
+  Map<String, int> _stats = const {};
   bool _loading = true;
+  int _profileTab = 0;
+  final _profileTabController = PageController();
 
   @override
   void initState() {
@@ -29,8 +33,15 @@ class _ProfilePageState extends State<ProfilePage> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _profileTabController.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     if (widget.demoMode || !AppConfig.isConfigured) {
+      _stats = const {'visitors': 10, 'following': 49, 'followers': 24};
       _profile = const {
         'saki_id': '3668252',
         'data': {
@@ -44,15 +55,26 @@ class _ProfilePageState extends State<ProfilePage> {
           'diamonds': 2,
           'wealth_level': 12,
           'charisma_level': 9,
+          'countryCode': 'SA',
+          'about': 'أشارككم أجمل لحظاتي وغرفي الصوتية على Saki',
+          'interests': ['موسيقى', 'تعارف', 'أصدقاء'],
+          'isVerified': true,
+          'isPremium': true,
         },
       };
     } else {
       try {
         _profile = await _auth.getMyProfile();
         _wallet = await _walletRepository.fetchWallet();
+        try {
+          _stats = await _auth.getMyProfileStats();
+        } catch (_) {
+          _stats = const {};
+        }
       } catch (_) {
         _profile = null;
         _wallet = WalletSnapshot.empty;
+        _stats = const {};
       }
     }
     if (mounted) setState(() => _loading = false);
@@ -72,19 +94,19 @@ class _ProfilePageState extends State<ProfilePage> {
     return value.isEmpty ? null : value;
   }
 
-  int get _followingCount => _countValue(
+  int get _followingCount => _stats['following'] ?? _countValue(
     _data,
     ['followingCount', 'following_count'],
     listKeys: ['following', 'followingUsers'],
   );
 
-  int get _followersCount => _countValue(
+  int get _followersCount => _stats['followers'] ?? _countValue(
     _data,
     ['followersCount', 'followers_count'],
     listKeys: ['followers', 'followerUsers'],
   );
 
-  int get _visitorsCount => _countValue(_data, [
+  int get _visitorsCount => _stats['visitors'] ?? _countValue(_data, [
     'visitsCount',
     'visitorsCount',
     'visitors_count',
@@ -100,6 +122,39 @@ class _ProfilePageState extends State<ProfilePage> {
 
   int get _wealthLevel =>
       _numberValue(_data, ['wealth_level', 'wealthLevel'], fallback: 1);
+
+  String get _sakiId => (_profile?['saki_id'] ?? '—').toString();
+
+  String get _countryCode => _firstString(
+    _data,
+    ['countryCode', 'country_code', 'country'],
+    fallback: '',
+  ).toUpperCase();
+
+  CountryOption? get _country => worldCountries
+      .where((item) => item.code == _countryCode)
+      .firstOrNull;
+
+  String get _about => _firstString(
+    _data,
+    ['about', 'bio', 'description'],
+    fallback: 'أهلاً بكم في ملفي على Saki',
+  );
+
+  List<String> get _interests => (_data['interests'] is List)
+      ? (_data['interests'] as List).whereType<String>().toList(growable: false)
+      : const [];
+
+  bool get _isVerified => _data['isVerified'] == true;
+
+  bool get _isPremium => _data['isPremium'] == true;
+
+  String _flagEmoji(String code) {
+    if (code.length != 2) return '🌐';
+    return String.fromCharCodes(
+      code.codeUnits.map((unit) => 0x1F1E6 + unit - 0x41),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -183,7 +238,7 @@ class _ProfilePageState extends State<ProfilePage> {
     return Column(
       children: [
         Container(
-          height: 128,
+          height: 136,
           decoration: const BoxDecoration(
             gradient: LinearGradient(
               colors: [AppColors.primary, Color(0xFFFDE68A)],
@@ -193,22 +248,28 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         ),
         Transform.translate(
-          offset: const Offset(0, -64),
+          offset: const Offset(0, -66),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
             child: Column(
               children: [
                 _buildIdentity(),
-                const SizedBox(height: 20),
-                _buildStats(),
+                const SizedBox(height: 18),
+                _buildProfileTabs(),
                 const SizedBox(height: 10),
-                _buildWealthChip(),
-                const SizedBox(height: 16),
-                _buildActionGrid(),
-                const SizedBox(height: 16),
-                _buildMenu(),
+                SizedBox(
+                  height: 510,
+                  child: PageView(
+                    controller: _profileTabController,
+                    onPageChanged: (value) => setState(() => _profileTab = value),
+                    children: [
+                      _buildOverviewTab(),
+                      _buildAboutTab(),
+                    ],
+                  ),
+                ),
                 if (widget.demoMode || !AppConfig.isConfigured) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 10),
                   const Text(
                     'وضع المعاينة مفعّل — البيانات المعروضة تجريبية.',
                     textAlign: TextAlign.center,
@@ -228,6 +289,136 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  Widget _buildProfileTabs() {
+    return Container(
+      height: 45,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: const Color(0xFFF3F4F6)),
+        boxShadow: const [
+          BoxShadow(color: Color(0x10000000), blurRadius: 8, offset: Offset(0, 3)),
+        ],
+      ),
+      child: Row(
+        children: [
+          _ProfileTab(
+            title: 'الرئيسية',
+            selected: _profileTab == 0,
+            onTap: () => _selectProfileTab(0),
+          ),
+          _ProfileTab(
+            title: 'معلوماتي',
+            selected: _profileTab == 1,
+            onTap: () => _selectProfileTab(1),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _selectProfileTab(int index) {
+    setState(() => _profileTab = index);
+    _profileTabController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  Widget _buildOverviewTab() {
+    return ListView(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      children: [
+        _buildStats(),
+        const SizedBox(height: 10),
+        _buildWealthChip(),
+        const SizedBox(height: 14),
+        _buildActionGrid(),
+        const SizedBox(height: 14),
+        _buildMenu(),
+      ],
+    );
+  }
+
+  Widget _buildAboutTab() {
+    final country = _country;
+    return ListView(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: _profileCardDecoration,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.badge_outlined, color: AppColors.primary),
+                  const SizedBox(width: 9),
+                  const Text(
+                    'معلومات الحساب',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
+                  ),
+                  const Spacer(),
+                  if (_isVerified)
+                    const Icon(Icons.verified_rounded, color: Color(0xFF3B82F6), size: 19),
+                ],
+              ),
+              const SizedBox(height: 14),
+              _InfoLine(icon: Icons.alternate_email_rounded, label: 'اسم المستخدم', value: '@${_firstString(_data, ['userName', 'username'], fallback: 'saki_user')}'),
+              _InfoLine(icon: Icons.fingerprint_rounded, label: 'ID المستخدم', value: _sakiId),
+              _InfoLine(icon: Icons.public_rounded, label: 'الدولة', value: '${_flagEmoji(_countryCode)}  ${country?.name ?? (_countryCode.isEmpty ? 'غير محددة' : _countryCode)}'),
+              _InfoLine(icon: Icons.workspace_premium_rounded, label: 'المستوى', value: 'المستوى $_wealthLevel'),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: _profileCardDecoration,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('نبذة عني', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 8),
+              Text(_about, style: const TextStyle(color: AppColors.mutedText, height: 1.5)),
+              if (_interests.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                const Text('اهتماماتي', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: _interests.map((interest) => Chip(
+                    label: Text(interest, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700)),
+                    backgroundColor: const Color(0xFFFFF7ED),
+                    side: const BorderSide(color: Color(0xFFFED7AA)),
+                    visualDensity: VisualDensity.compact,
+                  )).toList(),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        _buildActionGrid(),
+      ],
+    );
+  }
+
+  BoxDecoration get _profileCardDecoration => BoxDecoration(
+    color: Colors.white,
+    borderRadius: BorderRadius.circular(17),
+    border: Border.all(color: const Color(0xFFF3F4F6)),
+    boxShadow: const [
+      BoxShadow(color: Color(0x10000000), blurRadius: 8, offset: Offset(0, 3)),
+    ],
+  );
+
   Widget _buildIdentity() {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -240,18 +431,62 @@ class _ProfilePageState extends State<ProfilePage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        _name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF111827),
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    if (_isPremium) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF1D6),
+                          borderRadius: BorderRadius.circular(99),
+                          border: Border.all(color: const Color(0xFFF6C453)),
+                        ),
+                        child: const Text(
+                          'VIP',
+                          style: TextStyle(
+                            color: Color(0xFFD97706),
+                            fontSize: 9,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 2),
                 Text(
-                  _name,
+                  '${_flagEmoji(_countryCode)}  ${_country?.name ?? 'الدولة غير محددة'}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: Color(0xFF111827),
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
+                    color: Color(0xFF6B7280),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 2),
-                const SizedBox(height: 8),
+                const SizedBox(height: 5),
+                Text(
+                  'ID: $_sakiId',
+                  style: const TextStyle(
+                    color: Color(0xFF9CA3AF),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 5),
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
@@ -377,44 +612,49 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         ],
       ),
-      child: Row(
+      child: GridView.count(
+        crossAxisCount: 4,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        mainAxisSpacing: 4,
+        crossAxisSpacing: 4,
+        childAspectRatio: .86,
         children: [
-          Expanded(
-            child: _ActionButton(
-              label: 'محفظتي',
-              icon: Icons.account_balance_wallet_rounded,
-              color: const Color(0xFFF59E0B),
-              background: const Color(0xFFFEF3C7),
-              onTap: _openWallet,
-            ),
+          _ActionButton(
+            label: 'الشحن',
+            icon: Icons.account_balance_wallet_rounded,
+            color: const Color(0xFFF59E0B),
+            background: const Color(0xFFFEF3C7),
+            onTap: _openWallet,
           ),
-          Expanded(
-            child: _ActionButton(
-              label: 'المتجر',
-              icon: Icons.storefront_rounded,
-              color: const Color(0xFFEC4899),
-              background: const Color(0xFFFCE7F3),
-              onTap: _openStore,
-            ),
+          _ActionButton(
+            label: 'VIP',
+            icon: Icons.diamond_rounded,
+            color: const Color(0xFFF59E0B),
+            background: const Color(0xFFFFF7D6),
+            onTap: _openVip,
           ),
-          Expanded(
-            child: _ActionButton(
-              label: 'المستوى',
-              icon: Icons.layers_rounded,
-              color: const Color(0xFFA855F7),
-              background: const Color(0xFFF3E8FF),
-              onTap: _openLevel,
-            ),
+          _ActionButton(
+            label: 'المتجر',
+            icon: Icons.storefront_rounded,
+            color: const Color(0xFFEC4899),
+            background: const Color(0xFFFCE7F3),
+            onTap: _openStore,
           ),
-          Expanded(
-            child: _ActionButton(
-              label: 'المهمات',
-              icon: Icons.event_available_rounded,
-              color: const Color(0xFF06B6D4),
-              background: const Color(0xFFCFFAFE),
-              showBadge: true,
-              onTap: _openTasks,
-            ),
+          _ActionButton(
+            label: 'المهمات',
+            icon: Icons.event_available_rounded,
+            color: const Color(0xFFEAB308),
+            background: const Color(0xFFFEF9C3),
+            showBadge: true,
+            onTap: _openTasks,
+          ),
+          _ActionButton(
+            label: 'المستوى',
+            icon: Icons.leaderboard_rounded,
+            color: const Color(0xFF3B82F6),
+            background: const Color(0xFFDBEAFE),
+            onTap: _openLevel,
           ),
         ],
       ),
@@ -661,6 +901,86 @@ class _ProfilePageState extends State<ProfilePage> {
       if (list is List) return list.length;
     }
     return 0;
+  }
+}
+
+class _ProfileTab extends StatelessWidget {
+  const _ProfileTab({
+    required this.title,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String title;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(11),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? const Color(0xFFFFF1E6) : Colors.transparent,
+            borderRadius: BorderRadius.circular(11),
+          ),
+          child: Text(
+            title,
+            style: TextStyle(
+              color: selected ? AppColors.primaryDark : AppColors.mutedText,
+              fontSize: 12,
+              fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InfoLine extends StatelessWidget {
+  const _InfoLine({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: AppColors.primary),
+          const SizedBox(width: 9),
+          Text(
+            label,
+            style: const TextStyle(color: AppColors.mutedText, fontSize: 11),
+          ),
+          const Spacer(),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: AppColors.text,
+                fontSize: 11,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

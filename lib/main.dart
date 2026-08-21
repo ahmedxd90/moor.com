@@ -12,7 +12,10 @@ import 'features/home/presentation/home_shell.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SupabaseService.initialize();
-  runApp(const ProviderScope(child: SakiChatApp()));
+  const demoMode = bool.fromEnvironment('DEMO_MODE', defaultValue: false);
+  runApp(
+    const ProviderScope(child: SakiChatApp(demoMode: demoMode)),
+  );
 }
 
 class SakiChatApp extends StatelessWidget {
