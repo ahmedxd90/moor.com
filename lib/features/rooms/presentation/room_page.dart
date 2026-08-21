@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_widgets.dart';
@@ -1139,7 +1140,9 @@ class _RoomPageState extends State<RoomPage> {
           },
           onPrivateChat: () => _openDirectChat(member),
           onMention: () {
-            _text.text = '@${member.name} ';
+            final mention = '@${member.name} ';
+            unawaited(Clipboard.setData(ClipboardData(text: mention.trim())));
+            _text.text = mention;
             _text.selection = TextSelection.fromPosition(
               TextPosition(offset: _text.text.length),
             );
