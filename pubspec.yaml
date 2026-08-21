@@ -77,7 +77,6 @@ flutter:
     - assets/images/
     - assets/videos/
     - assets/levels/
-    - assets/room/
 
   fonts:
     - family: Tajawal

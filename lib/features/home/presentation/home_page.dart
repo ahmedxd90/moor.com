@@ -11,9 +11,10 @@ import '../../rooms/presentation/create_room_page.dart';
 import '../../rooms/presentation/room_page.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, this.demoMode = false});
+  const HomePage({super.key, this.demoMode = false, this.onOpenRoom});
 
   final bool demoMode;
+  final ValueChanged<Room>? onOpenRoom;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -414,14 +415,22 @@ class _HomePageState extends State<HomePage> {
                   room: rooms[index],
                   followed: _followedIds.contains(rooms[index].id),
                   onFollow: () => _toggleFollow(rooms[index]),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => RoomPage(
-                        room: rooms[index],
-                        demoMode: widget.demoMode,
-                      ),
-                    ),
-                  ),
+                  onTap: () {
+                    final room = rooms[index];
+                    final openRoom = widget.onOpenRoom;
+                    if (openRoom != null) {
+                      openRoom(room);
+                    } else {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => RoomPage(
+                            room: room,
+                            demoMode: widget.demoMode,
+                          ),
+                        ),
+                      );
+                    }
+                  },
                 ),
               ),
             ),

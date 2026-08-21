@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../data/room_background_bridge.dart';
+
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../messages/data/messages_repository.dart';
@@ -12,16 +14,25 @@ import '../data/rooms_repository.dart';
 import '../models/room.dart';
 
 class RoomPage extends StatefulWidget {
-  const RoomPage({super.key, required this.room, this.demoMode = false});
+  const RoomPage({
+    super.key,
+    required this.room,
+    this.demoMode = false,
+    this.onMinimize,
+    this.onExit,
+  });
 
   final Room room;
   final bool demoMode;
+  final VoidCallback? onMinimize;
+  final VoidCallback? onExit;
 
   @override
   State<RoomPage> createState() => _RoomPageState();
 }
 
-class _RoomPageState extends State<RoomPage> {
+class _RoomPageState extends State<RoomPage>
+    with WidgetsBindingObserver {
   final _rooms = const RoomsRepository();
   final _messages = const MessagesRepository();
   final _agora = AgoraAudioService();
@@ -53,6 +64,9 @@ class _RoomPageState extends State<RoomPage> {
   bool _joined = false;
   bool _micOn = false;
   bool _loading = true;
+  bool _backgroundStarted = false;
+  bool _exitBusy = false;
+  bool _hardExitCommitted = false;
 
   static final _demoTime1 = DateTime(2026, 1, 1, 20, 10);
   static final _demoTime2 = DateTime(2026, 1, 1, 20, 11);
@@ -88,6 +102,7 @@ class _RoomPageState extends State<RoomPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _room = widget.room;
     if (widget.demoMode) {
       _messageItems = _demoMessages;
@@ -98,6 +113,18 @@ class _RoomPageState extends State<RoomPage> {
     } else {
       _connect();
     }
+  }
+
+  Future<void> _startBackgroundSession() async {
+    if (widget.demoMode || _backgroundStarted) return;
+    _backgroundStarted = true;
+    await RoomPermissions.requestCoreRoomPermissions();
+    await RoomBackgroundBridge.start(
+      roomId: _room.id,
+      roomName: _room.name,
+      roomNumber: _room.roomNumber?.toString() ?? '',
+      coverUrl: _room.coverUrl,
+    );
   }
 
   List<RoomMember> _demoMembers() => List.generate(_room.seatCount, (index) {
@@ -145,6 +172,7 @@ class _RoomPageState extends State<RoomPage> {
   Future<void> _connect() async {
     try {
       await _rooms.joinRoom(_room.id);
+      await _startBackgroundSession();
       _memberSubscription = _rooms
           .watchRoomMembers(_room.id)
           .listen(_handleMembersChanged);
@@ -207,7 +235,25 @@ class _RoomPageState extends State<RoomPage> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (widget.demoMode || !_backgroundStarted || _hardExitCommitted) return;
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      unawaited(
+        RoomBackgroundBridge.showBubble(
+          roomId: _room.id,
+          roomName: _room.name,
+          roomNumber: _room.roomNumber?.toString() ?? '',
+          coverUrl: _room.coverUrl,
+        ),
+      );
+    } else if (state == AppLifecycleState.resumed) {
+      unawaited(RoomBackgroundBridge.hideBubble());
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _messageSubscription?.cancel();
     _memberSubscription?.cancel();
     _giftSubscription?.cancel();
@@ -216,8 +262,11 @@ class _RoomPageState extends State<RoomPage> {
     _agoraSubscription?.cancel();
     _giftTimer?.cancel();
     _joinBannerTimer?.cancel();
-    _agora.dispose();
-    if (!widget.demoMode) _rooms.leaveRoom(_room.id);
+    if (!_hardExitCommitted && !widget.demoMode) {
+      unawaited(_rooms.leaveRoom(_room.id));
+      unawaited(RoomBackgroundBridge.stop());
+    }
+    unawaited(_agora.dispose());
     _text.dispose();
     super.dispose();
   }
@@ -417,7 +466,12 @@ class _RoomPageState extends State<RoomPage> {
   @override
   Widget build(BuildContext context) {
     final colors = _themeColors;
-    return Scaffold(
+    return PopScope<void>(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) unawaited(_openExitDialog());
+      },
+      child: Scaffold(
       backgroundColor: colors.last,
       body: Container(
         decoration: BoxDecoration(
@@ -459,10 +513,104 @@ class _RoomPageState extends State<RoomPage> {
           ],
         ),
       ),
+    ),
     );
   }
 
-  List<Color> get _themeColors => const [Color(0xFFFFEDD5), Color(0xFFFFFBEB)];
+  List<Color> get _themeColors => const [Color(0xFF0A2530), Color(0xFF123B4B)];
+
+  Future<void> _openExitDialog() async {
+    if (_exitBusy || !mounted) return;
+    final action = await showDialog<_RoomExitAction>(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withValues(alpha: .62),
+      builder: (_) => const _RoomExitDialog(),
+    );
+    if (!mounted || action == null) return;
+    if (action == _RoomExitAction.exit) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierColor: Colors.black.withValues(alpha: .62),
+        builder: (dialogContext) => AlertDialog(
+          title: const Text(
+            'تأكيد الخروج',
+            style: TextStyle(fontWeight: FontWeight.w900),
+          ),
+          content: const Text(
+            'سيتم إنهاء الاتصال والنزول من المقعد وإزالة وجودك من الغرفة.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+              child: const Text('تأكيد الخروج'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true) await _leaveCurrentRoom();
+    } else {
+      await _minimizeRoom();
+    }
+  }
+
+  Future<void> _minimizeRoom() async {
+    if (_exitBusy) return;
+    setState(() => _exitBusy = true);
+    try {
+      if (!widget.demoMode) {
+        final overlayEnabled = await RoomBackgroundBridge.canDrawOverlays();
+        if (!overlayEnabled) {
+          await RoomBackgroundBridge.requestOverlayPermission();
+        }
+        await RoomBackgroundBridge.showBubble(
+          roomName: _room.name,
+          roomNumber: _room.roomNumber?.toString() ?? '',
+          coverUrl: _room.coverUrl,
+        );
+      }
+      if (mounted) widget.onMinimize?.call();
+    } finally {
+      if (mounted) setState(() => _exitBusy = false);
+    }
+  }
+
+  Future<void> _leaveCurrentRoom() async {
+    if (_exitBusy) return;
+    setState(() => _exitBusy = true);
+    try {
+      final seated = _currentSeatedMember;
+      if (!widget.demoMode && seated != null) {
+        await _agora.leaveSeat();
+        await _rooms.setSeat(
+          roomId: _room.id,
+          userId: seated.userId,
+          seatIndex: null,
+        );
+      }
+      if (!widget.demoMode) await _rooms.leaveRoom(_room.id);
+      await _agora.leaveChannel();
+      await RoomBackgroundBridge.stop();
+      _hardExitCommitted = true;
+      if (mounted) {
+        final callback = widget.onExit;
+        if (callback != null) {
+          callback();
+        } else {
+          Navigator.of(context).pop();
+        }
+      }
+    } catch (error) {
+      if (mounted) _show(error.toString(), error: true);
+    } finally {
+      if (mounted) setState(() => _exitBusy = false);
+    }
+  }
 
   Widget _buildAtmosphere() {
     return IgnorePointer(
@@ -501,66 +649,74 @@ class _RoomPageState extends State<RoomPage> {
 
   Widget _buildTopBar() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 9, 14, 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: InkWell(
-              onTap: _openRoomInfo,
-              borderRadius: BorderRadius.circular(18),
-              child: Row(
-                children: [
-                  _RoomCoverSmall(room: _room, size: 50),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _room.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: AppColors.text,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w900,
+      padding: const EdgeInsets.fromLTRB(12, 9, 12, 4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: .08),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: Colors.white.withValues(alpha: .14)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: InkWell(
+                onTap: _openRoomInfo,
+                borderRadius: BorderRadius.circular(18),
+                child: Row(
+                  children: [
+                    _RoomCoverSmall(room: _room, size: 47),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _room.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w900,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'ID الغرفة: ${_room.roomNumber ?? '—'}',
-                          style: const TextStyle(
-                            color: AppColors.mutedText,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
+                          const SizedBox(height: 2),
+                          Text(
+                            'ID الغرفة: ${_room.roomNumber ?? '—'}',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          IconButton(
-            onPressed: _openMembers,
-            tooltip: 'المتصلون',
-            color: AppColors.text,
-            icon: const Icon(Icons.people_alt_outlined),
-          ),
-          IconButton(
-            onPressed: _openRankings,
-            tooltip: 'ترتيب الهدايا',
-            color: const Color(0xFFE08A00),
-            icon: const Icon(Icons.emoji_events_rounded),
-          ),
-          IconButton(
-            onPressed: () => Navigator.of(context).pop(),
-            tooltip: 'خروج',
-            color: AppColors.primary,
-            icon: const Icon(Icons.logout_rounded),
-          ),
-        ],
+            IconButton(
+              onPressed: _openMembers,
+              tooltip: 'المتصلون',
+              color: Colors.white,
+              icon: const Icon(Icons.people_alt_outlined),
+            ),
+            IconButton(
+              onPressed: _openRankings,
+              tooltip: 'ترتيب الهدايا',
+              color: const Color(0xFFFFC34D),
+              icon: const Icon(Icons.emoji_events_rounded),
+            ),
+            IconButton(
+              onPressed: () => unawaited(_openExitDialog()),
+              tooltip: 'خروج أو حفظ',
+              color: const Color(0xFFFFB14A),
+              icon: const Icon(Icons.logout_rounded),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -571,18 +727,18 @@ class _RoomPageState extends State<RoomPage> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: .88),
+          color: Colors.black.withValues(alpha: .22),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border),
+          border: Border.all(color: Colors.white.withValues(alpha: .14)),
         ),
         child: Row(
           children: [
-            const Icon(Icons.circle, color: Color(0xFF22C55E), size: 9),
+            const Icon(Icons.circle, color: Color(0xFF4ADE80), size: 9),
             const SizedBox(width: 7),
             Text(
               _joined ? '${_members.length} متصل الآن' : 'جارٍ الاتصال...',
               style: const TextStyle(
-                color: AppColors.text,
+                color: Colors.white,
                 fontSize: 11,
                 fontWeight: FontWeight.w800,
               ),
@@ -596,7 +752,7 @@ class _RoomPageState extends State<RoomPage> {
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.end,
                   style: const TextStyle(
-                    color: AppColors.mutedText,
+                    color: Colors.white70,
                     fontSize: 10,
                   ),
                 ),
@@ -604,7 +760,7 @@ class _RoomPageState extends State<RoomPage> {
             else
               const Text(
                 'اضغط على مقعد للتحدث',
-                style: TextStyle(color: AppColors.mutedText, fontSize: 10),
+                style: TextStyle(color: Colors.white70, fontSize: 10),
               ),
           ],
         ),
@@ -822,10 +978,10 @@ class _RoomPageState extends State<RoomPage> {
                   ),
                   decoration: BoxDecoration(
                     color: item.type == 'gift'
-                        ? const Color(0xFFFFF0C2)
-                        : Colors.white.withValues(alpha: .94),
+                        ? const Color(0xCCB7791F)
+                        : Colors.black.withValues(alpha: .26),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.border),
+                    border: Border.all(color: Colors.white.withValues(alpha: .14)),
                   ),
                   child: RichText(
                     text: TextSpan(
@@ -833,7 +989,7 @@ class _RoomPageState extends State<RoomPage> {
                         TextSpan(
                           text: '${item.authorName ?? 'عضو'}  ',
                           style: const TextStyle(
-                            color: AppColors.primary,
+                            color: Color(0xFFFFC34D),
                             fontSize: 10,
                             fontWeight: FontWeight.w900,
                           ),
@@ -841,7 +997,7 @@ class _RoomPageState extends State<RoomPage> {
                         TextSpan(
                           text: item.content,
                           style: const TextStyle(
-                            color: AppColors.text,
+                            color: Colors.white,
                             fontSize: 12,
                             height: 1.35,
                           ),
@@ -864,12 +1020,12 @@ class _RoomPageState extends State<RoomPage> {
       top: false,
       child: Container(
         padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: AppColors.border)),
-          boxShadow: [
+        decoration: BoxDecoration(
+          color: const Color(0xE6102F3D),
+          border: Border(top: BorderSide(color: Colors.white24)),
+          boxShadow: const [
             BoxShadow(
-              color: Color(0x14000000),
+              color: Color(0x55000000),
               blurRadius: 12,
               offset: Offset(0, -3),
             ),
@@ -880,35 +1036,35 @@ class _RoomPageState extends State<RoomPage> {
           children: [
             _ToolButton(
               icon: Icons.chat_bubble_outline_rounded,
-              color: AppColors.primary,
+              color: Colors.white,
               onTap: _openMessageComposer,
             ),
             if (seated)
               _ToolButton(
                 icon: _micOn ? Icons.mic_rounded : Icons.mic_off_rounded,
-                color: _micOn ? const Color(0xFF16A34A) : AppColors.primary,
+                color: _micOn ? const Color(0xFF4ADE80) : const Color(0xFFFFB14A),
                 onTap: _toggleMic,
               ),
             _ToolButton(
               icon: _remoteAudioOn
                   ? Icons.volume_up_rounded
                   : Icons.volume_off_rounded,
-              color: AppColors.text,
+              color: Colors.white,
               onTap: _toggleRemoteAudio,
             ),
             _ToolButton(
               icon: Icons.emoji_emotions_outlined,
-              color: AppColors.text,
+              color: Colors.white,
               onTap: () => _openReactionPicker(null),
             ),
             _ToolButton(
               icon: Icons.card_giftcard_rounded,
-              color: const Color(0xFFE08A00),
+              color: const Color(0xFFFFC34D),
               onTap: _openGiftPicker,
             ),
             _ToolButton(
               icon: Icons.grid_view_rounded,
-              color: AppColors.text,
+              color: Colors.white,
               onTap: _openRoomInfo,
             ),
           ],
@@ -1376,8 +1532,20 @@ class _RoomPageState extends State<RoomPage> {
         room: _room,
         membersCount: _members.length,
         onSettings: _isCurrentUserOwner ? _openRoomSettings : null,
+        onRequestMediaPermissions: _requestMediaPermissions,
+        onRequestOverlayPermission: _requestOverlayPermission,
       ),
     );
+  }
+
+  Future<void> _requestMediaPermissions() async {
+    await RoomPermissions.requestMediaPermissions();
+    if (mounted) _show('تم طلب أذونات الصور والفيديو والملفات والموسيقى');
+  }
+
+  Future<void> _requestOverlayPermission() async {
+    await RoomBackgroundBridge.requestOverlayPermission();
+    if (mounted) _show('فعّل إذن الظهور فوق التطبيقات لإظهار فقاعة الغرفة');
   }
 
   Future<void> _openRoomSettings() async {
@@ -1451,6 +1619,140 @@ class _RoomPageState extends State<RoomPage> {
   }
 }
 
+enum _RoomExitAction { exit, minimize }
+
+class _RoomExitDialog extends StatelessWidget {
+  const _RoomExitDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 46, vertical: 24),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(18, 22, 18, 16),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: .94),
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(color: Colors.white.withValues(alpha: .7)),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x66000000),
+              blurRadius: 28,
+              offset: Offset(0, 14),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'الغرفة الصوتية',
+              style: TextStyle(
+                color: Color(0xFF102C36),
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 5),
+            const Text(
+              'اختر ما تريد فعله بالغرفة الحالية',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Color(0xFF64748B), fontSize: 11),
+            ),
+            const SizedBox(height: 18),
+            _ExitChoice(
+              icon: Icons.logout_rounded,
+              label: 'خروج من الغرفة',
+              hint: 'إنهاء الاتصال والنزول من المقعد',
+              color: const Color(0xFFEF4444),
+              onTap: () => Navigator.pop(context, _RoomExitAction.exit),
+            ),
+            const SizedBox(height: 10),
+            _ExitChoice(
+              icon: Icons.bookmark_rounded,
+              label: 'حفظ الغرفة',
+              hint: 'تصغيرها والعودة مع بقاء الاتصال',
+              color: const Color(0xFF0F9D8A),
+              onTap: () => Navigator.pop(context, _RoomExitAction.minimize),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ExitChoice extends StatelessWidget {
+  const _ExitChoice({
+    required this.icon,
+    required this.label,
+    required this.hint,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final String hint;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: .08),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: color.withValues(alpha: .18)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                child: Icon(icon, color: Colors.white, size: 23),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        color: Color(0xFF102C36),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      hint,
+                      style: const TextStyle(
+                        color: Color(0xFF64748B),
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_left_rounded, color: color),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class RoomSettingsPage extends StatefulWidget {
   const RoomSettingsPage({super.key, required this.room});
 
@@ -1464,8 +1766,12 @@ class _RoomSettingsPageState extends State<RoomSettingsPage> {
   final _rooms = const RoomsRepository();
   late final TextEditingController _name;
   late final TextEditingController _announcement;
+  late final TextEditingController _tags;
+  late final TextEditingController _backgroundUrl;
   late int _seatCount;
   late bool _allowMemberMic;
+  late bool _allowAutoMic;
+  late String _micStyle;
   bool _busy = false;
 
   @override
@@ -1473,14 +1779,24 @@ class _RoomSettingsPageState extends State<RoomSettingsPage> {
     super.initState();
     _name = TextEditingController(text: widget.room.name);
     _announcement = TextEditingController(text: widget.room.announcement);
+    _tags = TextEditingController(
+      text: (widget.room.settings['tags'] as String?) ?? '',
+    );
+    _backgroundUrl = TextEditingController(
+      text: (widget.room.settings['room_background_url'] as String?) ?? '',
+    );
     _seatCount = widget.room.seatCount;
     _allowMemberMic = widget.room.allowMemberMic;
+    _allowAutoMic = widget.room.settings['allow_auto_mic'] == true;
+    _micStyle = (widget.room.settings['mic_style'] as String?) ?? 'classic';
   }
 
   @override
   void dispose() {
     _name.dispose();
     _announcement.dispose();
+    _tags.dispose();
+    _backgroundUrl.dispose();
     super.dispose();
   }
 
@@ -1495,6 +1811,10 @@ class _RoomSettingsPageState extends State<RoomSettingsPage> {
         settings: {
           'announcement': _announcement.text.trim(),
           'allow_member_mic': _allowMemberMic,
+          'allow_auto_mic': _allowAutoMic,
+          'tags': _tags.text.trim(),
+          'mic_style': _micStyle,
+          'room_background_url': _backgroundUrl.text.trim(),
           'member_fee': widget.room.memberFee,
         },
       );
@@ -1508,6 +1828,10 @@ class _RoomSettingsPageState extends State<RoomSettingsPage> {
               ...widget.room.settings,
               'announcement': _announcement.text.trim(),
               'allow_member_mic': _allowMemberMic,
+              'allow_auto_mic': _allowAutoMic,
+              'tags': _tags.text.trim(),
+              'mic_style': _micStyle,
+              'room_background_url': _backgroundUrl.text.trim(),
             },
           ),
         );
@@ -1566,6 +1890,59 @@ class _RoomSettingsPageState extends State<RoomSettingsPage> {
             ),
           ),
           const SizedBox(height: 16),
+          const _SettingsLabel('الوسوم'),
+          const SizedBox(height: 7),
+          TextField(
+            controller: _tags,
+            decoration: const InputDecoration(
+              hintText: 'مثال: موسيقى، تعارف، أصدقاء',
+              prefixIcon: Icon(Icons.sell_outlined),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const _SettingsLabel('خلفية الغرفة'),
+          const SizedBox(height: 7),
+          TextField(
+            controller: _backgroundUrl,
+            keyboardType: TextInputType.url,
+            decoration: const InputDecoration(
+              hintText: 'رابط صورة أو خلفية الغرفة',
+              prefixIcon: Icon(Icons.wallpaper_outlined),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const _SettingsLabel('مظهر الميكروفون'),
+          const SizedBox(height: 7),
+          DropdownButtonFormField<String>(
+            initialValue: _micStyle,
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.graphic_eq_rounded),
+            ),
+            items: const [
+              DropdownMenuItem(value: 'classic', child: Text('كلاسيكي')),
+              DropdownMenuItem(value: 'gold', child: Text('ذهبي')),
+              DropdownMenuItem(value: 'neon', child: Text('نيون')),
+            ],
+            onChanged: (value) {
+              if (value != null) setState(() => _micStyle = value);
+            },
+          ),
+          const SizedBox(height: 8),
+          SwitchListTile.adaptive(
+            value: _allowAutoMic,
+            onChanged: (value) => setState(() => _allowAutoMic = value),
+            activeThumbColor: AppColors.primary,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 5),
+            title: const Text(
+              'السماح بالتشغيل التلقائي للميكروفون',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+            ),
+            subtitle: const Text(
+              'يسمح للمستخدم المتوافق بالدخول إلى مقعد الصوت تلقائيًا.',
+              style: TextStyle(fontSize: 11),
+            ),
+          ),
+          const SizedBox(height: 10),
           const _SettingsLabel('عدد المقاعد'),
           const SizedBox(height: 7),
           Container(
@@ -2828,11 +3205,15 @@ class _RoomInfoSheet extends StatelessWidget {
     required this.room,
     required this.membersCount,
     this.onSettings,
+    this.onRequestMediaPermissions,
+    this.onRequestOverlayPermission,
   });
 
   final Room room;
   final int membersCount;
   final VoidCallback? onSettings;
+  final VoidCallback? onRequestMediaPermissions;
+  final VoidCallback? onRequestOverlayPermission;
 
   @override
   Widget build(BuildContext context) {
@@ -2900,12 +3281,28 @@ class _RoomInfoSheet extends StatelessWidget {
                 label: 'الإعلان',
                 value: room.announcement,
               ),
+            if (onRequestMediaPermissions != null) ...[
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: onRequestMediaPermissions,
+                icon: const Icon(Icons.perm_media_outlined),
+                label: const Text('أذونات الموسيقى والملفات والصور والفيديو'),
+              ),
+            ],
+            if (onRequestOverlayPermission != null) ...[
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: onRequestOverlayPermission,
+                icon: const Icon(Icons.open_in_new_rounded),
+                label: const Text('إذن الظهور فوق التطبيقات والفقاعة'),
+              ),
+            ],
             if (onSettings != null) ...[
               const SizedBox(height: 12),
               FilledButton.icon(
                 onPressed: onSettings,
                 icon: const Icon(Icons.settings_outlined),
-                label: const Text('إعدادات الغرفة'),
+                label: const Text('إعدادات المالك'),
               ),
             ],
           ],
@@ -2999,7 +3396,7 @@ class _SettingsCover extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(
           child: Text(
-            'إعدادات المالك فقط\nتتحكم هنا في المقاعد والإعلان وصلاحية الميكروفون.',
+            'إعدادات المالك فقط\nتتحكم هنا في المقاعد والإعلان والوسوم وشكل الميكروفون والخلفية.',
             style: const TextStyle(
               color: AppColors.mutedText,
               fontSize: 12,
