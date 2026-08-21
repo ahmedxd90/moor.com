@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../../core/supabase/supabase_client.dart';
+
 class AgoraAudioState {
   const AgoraAudioState({
     this.initialized = false,
@@ -47,16 +49,15 @@ class AgoraAudioState {
 class AgoraAudioService {
   AgoraAudioService({String? appId, String? token})
     : _appId = appId ?? _defaultAppId,
-      _token = token ?? _defaultToken;
+      _token = token;
 
   static const _defaultAppId = String.fromEnvironment(
     'AGORA_APP_ID',
-    defaultValue: '0d1e69abe9734f03944293c27b74365d',
+    defaultValue: '2b7923995fcb4289b3d801aa34f67414',
   );
-  static const _defaultToken = String.fromEnvironment('AGORA_TOKEN');
 
   final String _appId;
-  final String _token;
+  String? _token;
   final _state = StreamController<AgoraAudioState>.broadcast();
   AgoraAudioState _current = const AgoraAudioState();
   RtcEngine? _engine;
@@ -65,7 +66,8 @@ class AgoraAudioService {
 
   AgoraAudioState get currentState => _current;
   Stream<AgoraAudioState> get states => _state.stream;
-  bool get hasToken => _token.isNotEmpty;
+  bool get hasToken => _token?.isNotEmpty == true;
+  String? _channelId;
 
   Future<void> initialize() async {
     if (_current.initialized || _disposed) return;
@@ -104,6 +106,12 @@ class AgoraAudioService {
           ),
         );
       },
+      onTokenPrivilegeWillExpire: (_, __) {
+        unawaited(_renewToken());
+      },
+      onRequestToken: (_) {
+        unawaited(_renewToken());
+      },
     );
     engine.registerEventHandler(handler);
     await engine.enableAudio();
@@ -116,8 +124,10 @@ class AgoraAudioService {
     await initialize();
     final engine = _engine;
     if (engine == null || _current.joined) return;
+    _channelId = channelId;
+    _token = await _fetchToken(channelId);
     await engine.joinChannel(
-      token: _token,
+      token: _token!,
       channelId: channelId,
       uid: 0,
       options: const ChannelMediaOptions(
@@ -183,6 +193,8 @@ class AgoraAudioService {
     final engine = _engine;
     if (engine == null) return;
     if (_current.joined) await engine.leaveChannel();
+    _channelId = null;
+    _token = null;
     if (_handler != null) engine.unregisterEventHandler(_handler!);
     await engine.release();
     _engine = null;
@@ -195,6 +207,39 @@ class AgoraAudioService {
     _disposed = true;
     await leaveChannel();
     await _state.close();
+  }
+
+  Future<String> _fetchToken(String channelId) async {
+    final response = await SupabaseService.client.functions.invoke(
+      'agora-token',
+      body: {'channelName': channelId},
+    );
+    final data = response.data;
+    if (data is! Map || data['token'] is! String) {
+      final error = data is Map ? data['error'] : null;
+      throw StateError(
+        'تعذر الحصول على Agora Token${error == null ? '' : ': $error'}',
+      );
+    }
+    final appId = data['appId'];
+    if (appId is String && appId.isNotEmpty && appId != _appId) {
+      throw StateError('Agora App ID في الخادم لا يطابق App ID في التطبيق');
+    }
+    return data['token'] as String;
+  }
+
+  Future<void> _renewToken() async {
+    final channelId = _channelId;
+    final engine = _engine;
+    if (channelId == null || engine == null || !_current.joined) return;
+    try {
+      final token = await _fetchToken(channelId);
+      await engine.renewToken(token);
+      _token = token;
+      _emit(_current.copyWith(clearError: true));
+    } catch (error) {
+      _emit(_current.copyWith(error: 'تعذر تجديد Agora Token: $error'));
+    }
   }
 
   void _emit(AgoraAudioState next) {
