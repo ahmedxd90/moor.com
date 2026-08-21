@@ -27,42 +27,23 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
   final _auth = const AuthRepository();
   final _picker = ImagePicker();
   final _formKey = GlobalKey<FormState>();
-  late final TextEditingController _fullName;
-  late final TextEditingController _nickname;
   late final TextEditingController _userName;
-  late final TextEditingController _about;
   String _gender = 'male';
   String _countryCode = 'SA';
   String? _avatarUrl;
   Uint8List? _avatarBytes;
   bool _busy = false;
-  final _interests = <String>{};
-  final _availableInterests = const [
-    'music',
-    'technology',
-    'games',
-    'travel',
-    'photography',
-    'sports',
-    'books',
-    'art',
-  ];
 
   @override
   void initState() {
     super.initState();
     final data = _auth.profileData(widget.existingProfile);
-    _fullName = TextEditingController(text: data['fullName'] as String? ?? '');
-    _nickname = TextEditingController(text: data['nickname'] as String? ?? '');
-    _userName = TextEditingController(text: data['userName'] as String? ?? '');
-    _about = TextEditingController(text: data['about'] as String? ?? '');
+    _userName = TextEditingController(
+      text: data['userName'] as String? ?? data['nickname'] as String? ?? '',
+    );
     _gender = _normalizeGender(data['gender'] as String?);
     _countryCode = data['countryCode'] as String? ?? _countryCode;
-    _avatarUrl = data['avatarUrl'] as String?;
-    final savedInterests = data['interests'];
-    if (savedInterests is List) {
-      _interests.addAll(savedInterests.whereType<String>());
-    }
+    _avatarUrl = data['avatarUrl'] as String? ?? data['avatar_url'] as String?;
   }
 
   String _normalizeGender(String? value) => switch (value) {
@@ -77,10 +58,7 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
 
   @override
   void dispose() {
-    _fullName.dispose();
-    _nickname.dispose();
     _userName.dispose();
-    _about.dispose();
     super.dispose();
   }
 
@@ -119,24 +97,17 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
           fileName: 'avatar-${DateTime.now().millisecondsSinceEpoch}.jpg',
         );
       }
-      final sakiId = await _auth.saveMyProfile(
-        fullName: _fullName.text,
-        nickname: _nickname.text,
+      await _auth.saveMyProfile(
+        fullName: _userName.text,
+        nickname: _userName.text,
         userName: _userName.text,
         gender: _gender,
         countryCode: _countryCode,
-        about: _about.text,
-        interests: _interests.toList(),
+        about: '',
+        interests: const [],
         avatarUrl: avatarUrl,
       );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('تم حفظ ملفك. Saki ID الخاص بك: $sakiId'),
-          backgroundColor: AppColors.success,
-        ),
-      );
-      widget.onCompleted();
+      if (mounted) widget.onCompleted();
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -164,108 +135,48 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
         child: Form(
           key: _formKey,
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+            padding: const EdgeInsets.fromLTRB(38, 18, 38, 28),
             children: [
-              _buildAvatarCard(),
-              const SizedBox(height: 20),
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF3B1D68), Color(0xFF1E2145)],
-                  ),
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(
-                    color: AppColors.primary.withValues(alpha: .35),
-                  ),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(
-                      Icons.auto_awesome,
-                      color: AppColors.secondary,
-                      size: 30,
-                    ),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'خطوة واحدة وتصبح جاهزًا لاكتشاف غرف Saki Chat والتواصل مع المجتمع.',
-                        style: TextStyle(
-                          height: 1.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
-              const Text(
-                'المعلومات الأساسية',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _fullName,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  labelText: 'الاسم الكامل',
-                  prefixIcon: Icon(Icons.person_outline),
-                ),
-                validator: (value) => value == null || value.trim().length < 2
-                    ? 'أدخل اسمك الكامل'
-                    : null,
-              ),
-              const SizedBox(height: 13),
-              TextFormField(
-                controller: _nickname,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  labelText: 'الاسم الظاهر',
-                  prefixIcon: Icon(Icons.badge_outlined),
-                ),
-                validator: (value) => value == null || value.trim().length < 2
-                    ? 'أدخل اسمًا ظاهرًا'
-                    : null,
-              ),
-              const SizedBox(height: 13),
+              _buildAvatarPicker(),
+              const SizedBox(height: 28),
+              _buildLabel('اسم المستخدم'),
+              const SizedBox(height: 8),
               TextFormField(
                 controller: _userName,
                 textDirection: TextDirection.ltr,
-                textInputAction: TextInputAction.next,
+                textInputAction: TextInputAction.done,
                 decoration: const InputDecoration(
-                  labelText: 'اسم المستخدم',
-                  hintText: 'saki_user',
+                  hintText: 'أدخل اسم المستخدم',
                   prefixIcon: Icon(Icons.alternate_email),
                 ),
                 validator: (value) {
-                  final v = value?.trim() ?? '';
-                  return v.length < 3 || v.contains(' ')
-                      ? 'استخدم 3 أحرف على الأقل بدون مسافات'
-                      : null;
+                  final username = value?.trim() ?? '';
+                  if (username.length < 3 || username.contains(' ')) {
+                    return 'استخدم 3 أحرف على الأقل بدون مسافات';
+                  }
+                  return null;
                 },
               ),
-              const SizedBox(height: 13),
-              DropdownButtonFormField<String>(
-                initialValue: _gender,
-                decoration: const InputDecoration(
-                  labelText: 'الجنس',
-                  prefixIcon: Icon(Icons.people_outline),
-                ),
-                items: const [
-                  DropdownMenuItem(value: 'male', child: Text('ذكر')),
-                  DropdownMenuItem(value: 'female', child: Text('أنثى')),
+              const SizedBox(height: 22),
+              _buildLabel('الجنس'),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(child: _genderChoice('male', 'ذكر', Icons.male)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _genderChoice('female', 'أنثى', Icons.female),
+                  ),
                 ],
-                onChanged: (value) =>
-                    setState(() => _gender = value ?? _gender),
               ),
-              const SizedBox(height: 13),
+              const SizedBox(height: 22),
+              _buildLabel('الدولة'),
+              const SizedBox(height: 8),
               InkWell(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(14),
                 onTap: _chooseCountry,
                 child: InputDecorator(
                   decoration: const InputDecoration(
-                    labelText: 'الدولة',
                     prefixIcon: Icon(Icons.public),
                     suffixIcon: Icon(Icons.chevron_left),
                   ),
@@ -275,58 +186,7 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
                   ),
                 ),
               ),
-              const SizedBox(height: 13),
-              TextFormField(
-                controller: _about,
-                maxLines: 3,
-                maxLength: 180,
-                decoration: const InputDecoration(
-                  labelText: 'نبذة عنك (اختياري)',
-                  alignLabelWithHint: true,
-                  prefixIcon: Icon(Icons.edit_note_outlined),
-                ),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'اهتماماتك',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _availableInterests
-                    .map(
-                      (interest) => FilterChip(
-                        label: Text(_interestLabel(interest)),
-                        selected: _interests.contains(interest),
-                        onSelected: (selected) => setState(
-                          () => selected
-                              ? _interests.add(interest)
-                              : _interests.remove(interest),
-                        ),
-                        selectedColor: AppColors.primary,
-                        checkmarkColor: AppColors.white,
-                        labelStyle: TextStyle(
-                          color: _interests.contains(interest)
-                              ? AppColors.white
-                              : AppColors.mutedText,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    )
-                    .toList(),
-              ),
-              const SizedBox(height: 18),
-              Text(
-                'سيتم إنشاء Saki ID فريد من 9 أرقام وحفظه تلقائيًا عند الحفظ.',
-                style: TextStyle(
-                  color: AppColors.mutedText.withValues(alpha: .9),
-                  fontSize: 12,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 30),
               SakiGradientButton(
                 label: 'حفظ ومتابعة',
                 icon: Icons.arrow_back,
@@ -340,74 +200,101 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
     );
   }
 
-  Widget _buildAvatarCard() {
-    final image = _avatarBytes == null && _avatarUrl == null
-        ? const Icon(Icons.person, size: 42, color: AppColors.mutedText)
+  Widget _buildLabel(String text) => Text(
+    text,
+    style: const TextStyle(
+      color: AppColors.text,
+      fontWeight: FontWeight.w800,
+      fontSize: 14,
+    ),
+  );
+
+  Widget _genderChoice(String value, String label, IconData icon) {
+    final selected = _gender == value;
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: () => setState(() => _gender = value),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        height: 54,
+        decoration: BoxDecoration(
+          color: selected ? AppColors.primary : AppColors.surfaceElevated,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected ? AppColors.primary : AppColors.border,
+            width: selected ? 1.6 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              color: selected ? AppColors.white : AppColors.primaryDark,
+              size: 21,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: selected ? AppColors.white : AppColors.text,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAvatarPicker() {
+    final child = _avatarBytes == null && _avatarUrl == null
+        ? const Icon(Icons.person, size: 48, color: AppColors.secondary)
         : ClipOval(
             child: _avatarBytes != null
                 ? Image.memory(_avatarBytes!, fit: BoxFit.cover)
                 : Image.network(_avatarUrl!, fit: BoxFit.cover),
           );
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 84,
-            height: 84,
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: .14),
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: AppColors.primary.withValues(alpha: .55),
-                width: 2,
+    return Center(
+      child: GestureDetector(
+        onTap: _busy ? null : _pickAvatar,
+        child: Stack(
+          alignment: Alignment.bottomRight,
+          children: [
+            Container(
+              width: 126,
+              height: 126,
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                color: AppColors.surfaceElevated,
+                shape: BoxShape.circle,
+                border: Border.all(color: AppColors.secondary, width: 4),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x22000000),
+                    blurRadius: 12,
+                    offset: Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: child,
+            ),
+            Container(
+              width: 38,
+              height: 38,
+              decoration: const BoxDecoration(
+                color: AppColors.primary,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.camera_alt_outlined,
+                color: AppColors.white,
+                size: 20,
               ),
             ),
-            child: image,
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'صورة المستخدم',
-                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
-                ),
-                const SizedBox(height: 5),
-                const Text(
-                  'أضف صورة تظهر لأصدقائك داخل Saki Chat.',
-                  style: TextStyle(color: AppColors.mutedText, fontSize: 12),
-                ),
-                const SizedBox(height: 10),
-                OutlinedButton.icon(
-                  onPressed: _busy ? null : _pickAvatar,
-                  icon: const Icon(Icons.photo_library_outlined, size: 18),
-                  label: const Text('اختيار صورة'),
-                ),
-              ],
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
-
-  String _interestLabel(String value) => switch (value) {
-    'music' => 'موسيقى',
-    'technology' => 'تقنية',
-    'games' => 'ألعاب',
-    'travel' => 'سفر',
-    'photography' => 'تصوير',
-    'sports' => 'رياضة',
-    'books' => 'كتب',
-    'art' => 'فن',
-    _ => value,
-  };
 }

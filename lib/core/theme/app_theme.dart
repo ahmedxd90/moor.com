@@ -1,31 +1,32 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class AppColors {
   const AppColors._();
 
-  static const background = Color(0xFF0F0F1A);
-  static const surface = Color(0xFF171729);
-  static const surfaceElevated = Color(0xFF211F3A);
-  static const primary = Color(0xFFA855F7);
-  static const primaryDark = Color(0xFF7C3AED);
-  static const secondary = Color(0xFFFBBF24);
-  static const accentPink = Color(0xFFEC4899);
-  static const accentBlue = Color(0xFF3B82F6);
+  static const background = Color(0xFFF3F4F6);
+  static const surface = Color(0xFFFFFFFF);
+  static const surfaceElevated = Color(0xFFFFF7ED);
+  static const primary = Color(0xFFFB923C);
+  static const primaryDark = Color(0xFFF97316);
+  static const secondary = Color(0xFFFDBA74);
+  static const accentPink = Color(0xFFF97316);
+  static const accentBlue = Color(0xFF60A5FA);
   static const success = Color(0xFF22C55E);
   static const danger = Color(0xFFEF4444);
-  static const text = Color(0xFFF8FAFC);
-  static const mutedText = Color(0xFF9CA3AF);
-  static const border = Color(0xFF302C4E);
+  static const text = Color(0xFF1F2937);
+  static const mutedText = Color(0xFF6B7280);
+  static const border = Color(0xFFE5E7EB);
   static const white = Colors.white;
 }
 
 class AppTheme {
   const AppTheme._();
 
-  static ThemeData dark() {
+  static ThemeData light() {
     final scheme = ColorScheme.fromSeed(
       seedColor: AppColors.primary,
-      brightness: Brightness.dark,
+      brightness: Brightness.light,
       surface: AppColors.surface,
       primary: AppColors.primary,
       secondary: AppColors.secondary,
@@ -34,57 +35,67 @@ class AppTheme {
 
     return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.dark,
+      brightness: Brightness.light,
       colorScheme: scheme,
       scaffoldBackgroundColor: AppColors.background,
-      fontFamily: 'Roboto',
+      textTheme: GoogleFonts.tajawalTextTheme(
+        ThemeData.light().textTheme,
+      ).apply(bodyColor: AppColors.text, displayColor: AppColors.text),
       visualDensity: VisualDensity.standard,
       appBarTheme: const AppBarTheme(
-        backgroundColor: AppColors.background,
+        backgroundColor: AppColors.surface,
         foregroundColor: AppColors.text,
         centerTitle: true,
         elevation: 0,
+        surfaceTintColor: Colors.transparent,
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: AppColors.surface,
+        fillColor: AppColors.surfaceElevated,
         hintStyle: const TextStyle(color: AppColors.mutedText),
         labelStyle: const TextStyle(color: AppColors.mutedText),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           borderSide: const BorderSide(color: AppColors.border),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           borderSide: const BorderSide(color: AppColors.border),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: AppColors.primary, width: 1.4),
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppColors.primary, width: 1.6),
         ),
       ),
       cardTheme: CardThemeData(
         color: AppColors.surface,
-        elevation: 0,
+        elevation: 1,
+        shadowColor: Colors.black.withValues(alpha: .06),
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: AppColors.surface,
-        indicatorColor: AppColors.primary.withValues(alpha: 0.22),
-        labelTextStyle: WidgetStatePropertyAll(
-          const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+        indicatorColor: AppColors.primary.withValues(alpha: 0.18),
+        labelTextStyle: const WidgetStatePropertyAll(
+          TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
         ),
-        iconTheme: WidgetStatePropertyAll(
+        iconTheme: const WidgetStatePropertyAll(
           IconThemeData(color: AppColors.mutedText),
         ),
       ),
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: AppColors.surfaceElevated,
-        contentTextStyle: const TextStyle(color: AppColors.text),
+        backgroundColor: AppColors.text,
+        contentTextStyle: const TextStyle(color: AppColors.white),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         behavior: SnackBarBehavior.floating,
       ),
     );
   }
+
+  static ThemeData dark() => light();
 }
