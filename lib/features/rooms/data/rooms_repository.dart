@@ -321,21 +321,11 @@ class RoomsRepository {
         .select('owner_id,metadata')
         .eq('id', roomId)
         .single();
-    final existing = await _client
-        .from('voice_room_members')
-        .select('seat_index,left_at')
-        .eq('room_id', roomId)
-        .eq('user_id', user.id)
-        .maybeSingle();
-    final existingSeat = (existing?['seat_index'] as num?)?.toInt();
-    final seatIndex = existing != null && existing['left_at'] == null
-        ? existingSeat
-        : null;
     await _client.from('voice_room_members').upsert({
       'room_id': roomId,
       'user_id': user.id,
       'role': room['owner_id'] == user.id ? 'owner' : 'listener',
-      'seat_index': seatIndex,
+      'seat_index': null,
       'is_muted': false,
       'is_speaking': false,
       'left_at': null,
