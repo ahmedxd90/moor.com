@@ -1,0 +1,16 @@
+Options -Indexes
+
+# Never expose server configuration, SQL dumps, or migration scripts.
+<FilesMatch "^(saki-config\.php|.*\.sql|.*migrate.*\.php|apply_.*\.php|schema_.*\.php|cleanup_.*\.php)$">
+  Require all denied
+</FilesMatch>
+
+# Uploaded media must never execute as PHP.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^uploads/.*\.(?:php|phtml|php[0-9]*)$ - [F,L,NC]
+</IfModule>
+
+<FilesMatch "^\.">
+  Require all denied
+</FilesMatch>
