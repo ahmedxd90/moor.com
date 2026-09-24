@@ -1,6 +1,11 @@
 class AppConfig {
   const AppConfig._();
 
+  static const apiUrl = String.fromEnvironment(
+    'SAKI_API_URL',
+    defaultValue: 'https://sakichat.freecpanel.shop/api.php',
+  );
+
   static const supabaseUrl = String.fromEnvironment(
     'SUPABASE_URL',
     defaultValue: 'https://uhaugikrudchlunaufjj.supabase.co',
@@ -23,4 +28,6 @@ class AppConfig {
       supabaseUrl.startsWith('https://') &&
       !supabaseUrl.contains('YOUR_PROJECT') &&
       supabasePublishableKey != 'YOUR_SUPABASE_PUBLISHABLE_KEY';
+
+  static bool get apiConfigured => apiUrl.startsWith('https://');
 }

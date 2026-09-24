@@ -11,39 +11,33 @@ import 'features/home/presentation/home_shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Transitional compatibility: rooms/realtime repositories are converted next.
   await SupabaseService.initialize();
   const demoMode = bool.fromEnvironment('DEMO_MODE', defaultValue: false);
-  runApp(
-    const ProviderScope(child: SakiChatApp(demoMode: demoMode)),
-  );
+  runApp(const ProviderScope(child: SakiChatApp(demoMode: demoMode)));
 }
 
 class SakiChatApp extends StatelessWidget {
   const SakiChatApp({super.key, this.demoMode = false});
-
   final bool demoMode;
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: AppConfig.appName,
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.light(),
-      locale: const Locale('ar'),
-      builder: (context, child) => Directionality(
-        textDirection: TextDirection.rtl,
-        child: child ?? const SizedBox.shrink(),
-      ),
-      home: AuthGate(demoMode: demoMode),
-    );
-  }
+  Widget build(BuildContext context) => MaterialApp(
+        title: AppConfig.appName,
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.light(),
+        locale: const Locale('ar'),
+        builder: (context, child) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: child ?? const SizedBox.shrink(),
+        ),
+        home: AuthGate(demoMode: demoMode),
+      );
 }
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key, this.demoMode = false});
-
   final bool demoMode;
-
   @override
   State<AuthGate> createState() => _AuthGateState();
 }
@@ -51,38 +45,39 @@ class AuthGate extends StatefulWidget {
 class _AuthGateState extends State<AuthGate> {
   final _auth = const AuthRepository();
   bool _demoEntered = false;
+  bool _loading = true;
+  bool _signedIn = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkSession();
+  }
+
+  Future<void> _checkSession() async {
+    final token = await _auth.sessionToken;
+    if (!mounted) return;
+    setState(() {
+      _signedIn = token?.isNotEmpty == true;
+      _loading = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (widget.demoMode) {
-      if (_demoEntered) return const HomeShell(demoMode: true);
-      return LoginPage(
-        demoMode: true,
-        onDemoEnter: () => setState(() => _demoEntered = true),
-      );
+    if (widget.demoMode || _demoEntered) {
+      return _demoEntered || widget.demoMode
+          ? const HomeShell(demoMode: true)
+          : LoginPage(demoMode: true, onDemoEnter: () => setState(() => _demoEntered = true));
     }
-    if (!AppConfig.isConfigured) {
-      if (_demoEntered) return const HomeShell(demoMode: true);
-      return LoginPage(
-        demoMode: true,
-        onDemoEnter: () => setState(() => _demoEntered = true),
-      );
-    }
-
-    return StreamBuilder(
-      stream: _auth.authStateChanges,
-      builder: (context, snapshot) {
-        final session = SupabaseService.client.auth.currentSession;
-        if (session == null) return const LoginPage();
-        return const ProfileGate();
-      },
-    );
+    if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (!_signedIn) return LoginPage(onDemoEnter: () => setState(() => _demoEntered = true));
+    return const ProfileGate();
   }
 }
 
 class ProfileGate extends StatefulWidget {
   const ProfileGate({super.key});
-
   @override
   State<ProfileGate> createState() => _ProfileGateState();
 }
@@ -99,19 +94,13 @@ class _ProfileGateState extends State<ProfileGate> {
   }
 
   Future<void> _load() async {
-    try {
-      _profile = await _auth.getMyProfile();
-    } catch (_) {
-      _profile = null;
-    }
+    _profile = await _auth.getMyProfile();
     if (mounted) setState(() => _loading = false);
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
+    if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
     if (!_auth.isProfileComplete(_profile)) {
       return CompleteProfilePage(existingProfile: _profile, onCompleted: _load);
     }
