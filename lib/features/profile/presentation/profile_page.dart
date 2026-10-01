@@ -6,6 +6,7 @@ import '../../auth/data/auth_repository.dart';
 import '../../auth/data/countries.dart';
 import '../../auth/presentation/complete_profile_page.dart';
 import '../../wallet/data/wallet_repository.dart';
+import 'aristocracy_page.dart';
 import 'account_pages.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -47,8 +48,7 @@ class _ProfilePageState extends State<ProfilePage> {
         'data': {
           'fullName': 'كلك نظر',
           'userName': 'kulk_nazar',
-          'avatarUrl':
-              'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=240&q=85',
+          'avatarUrl': 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=240&q=85',
           'followersCount': 1,
           'followingCount': 1,
           'visitsCount': 11,
@@ -94,24 +94,30 @@ class _ProfilePageState extends State<ProfilePage> {
     return value.isEmpty ? null : value;
   }
 
-  int get _followingCount => _stats['following'] ?? _countValue(
-    _data,
-    ['followingCount', 'following_count'],
-    listKeys: ['following', 'followingUsers'],
-  );
+  int get _followingCount =>
+      _stats['following'] ??
+      _countValue(
+        _data,
+        ['followingCount', 'following_count'],
+        listKeys: ['following', 'followingUsers'],
+      );
 
-  int get _followersCount => _stats['followers'] ?? _countValue(
-    _data,
-    ['followersCount', 'followers_count'],
-    listKeys: ['followers', 'followerUsers'],
-  );
+  int get _followersCount =>
+      _stats['followers'] ??
+      _countValue(
+        _data,
+        ['followersCount', 'followers_count'],
+        listKeys: ['followers', 'followerUsers'],
+      );
 
-  int get _visitorsCount => _stats['visitors'] ?? _countValue(_data, [
-    'visitsCount',
-    'visitorsCount',
-    'visitors_count',
-    'profileViews',
-  ]);
+  int get _visitorsCount =>
+      _stats['visitors'] ??
+      _countValue(_data, [
+        'visitsCount',
+        'visitorsCount',
+        'visitors_count',
+        'profileViews',
+      ]);
 
   int get _gemCount => _numberValue(_data, [
     'gemCount',
@@ -125,21 +131,20 @@ class _ProfilePageState extends State<ProfilePage> {
 
   String get _sakiId => (_profile?['saki_id'] ?? '—').toString();
 
-  String get _countryCode => _firstString(
-    _data,
-    ['countryCode', 'country_code', 'country'],
-    fallback: '',
-  ).toUpperCase();
+  String get _countryCode => _firstString(_data, [
+    'countryCode',
+    'country_code',
+    'country',
+  ], fallback: '').toUpperCase();
 
-  CountryOption? get _country => worldCountries
-      .where((item) => item.code == _countryCode)
-      .firstOrNull;
+  CountryOption? get _country =>
+      worldCountries.where((item) => item.code == _countryCode).firstOrNull;
 
-  String get _about => _firstString(
-    _data,
-    ['about', 'bio', 'description'],
-    fallback: 'أهلاً بكم في ملفي على Saki',
-  );
+  String get _about => _firstString(_data, [
+    'about',
+    'bio',
+    'description',
+  ], fallback: 'أهلاً بكم في ملفي على Saki');
 
   List<String> get _interests => (_data['interests'] is List)
       ? (_data['interests'] as List).whereType<String>().toList(growable: false)
@@ -261,11 +266,9 @@ class _ProfilePageState extends State<ProfilePage> {
                   height: 510,
                   child: PageView(
                     controller: _profileTabController,
-                    onPageChanged: (value) => setState(() => _profileTab = value),
-                    children: [
-                      _buildOverviewTab(),
-                      _buildAboutTab(),
-                    ],
+                    onPageChanged: (value) =>
+                        setState(() => _profileTab = value),
+                    children: [_buildOverviewTab(), _buildAboutTab()],
                   ),
                 ),
                 if (widget.demoMode || !AppConfig.isConfigured) ...[
@@ -298,7 +301,11 @@ class _ProfilePageState extends State<ProfilePage> {
         borderRadius: BorderRadius.circular(15),
         border: Border.all(color: const Color(0xFFF3F4F6)),
         boxShadow: const [
-          BoxShadow(color: Color(0x10000000), blurRadius: 8, offset: Offset(0, 3)),
+          BoxShadow(
+            color: Color(0x10000000),
+            blurRadius: 8,
+            offset: Offset(0, 3),
+          ),
         ],
       ),
       child: Row(
@@ -365,14 +372,36 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                   const Spacer(),
                   if (_isVerified)
-                    const Icon(Icons.verified_rounded, color: Color(0xFF3B82F6), size: 19),
+                    const Icon(
+                      Icons.verified_rounded,
+                      color: Color(0xFF3B82F6),
+                      size: 19,
+                    ),
                 ],
               ),
               const SizedBox(height: 14),
-              _InfoLine(icon: Icons.alternate_email_rounded, label: 'اسم المستخدم', value: '@${_firstString(_data, ['userName', 'username'], fallback: 'saki_user')}'),
-              _InfoLine(icon: Icons.fingerprint_rounded, label: 'ID المستخدم', value: _sakiId),
-              _InfoLine(icon: Icons.public_rounded, label: 'الدولة', value: '${_flagEmoji(_countryCode)}  ${country?.name ?? (_countryCode.isEmpty ? 'غير محددة' : _countryCode)}'),
-              _InfoLine(icon: Icons.workspace_premium_rounded, label: 'المستوى', value: 'المستوى $_wealthLevel'),
+              _InfoLine(
+                icon: Icons.alternate_email_rounded,
+                label: 'اسم المستخدم',
+                value:
+                    '@${_firstString(_data, ['userName', 'username'], fallback: 'saki_user')}',
+              ),
+              _InfoLine(
+                icon: Icons.fingerprint_rounded,
+                label: 'ID المستخدم',
+                value: _sakiId,
+              ),
+              _InfoLine(
+                icon: Icons.public_rounded,
+                label: 'الدولة',
+                value:
+                    '${_flagEmoji(_countryCode)}  ${country?.name ?? (_countryCode.isEmpty ? 'غير محددة' : _countryCode)}',
+              ),
+              _InfoLine(
+                icon: Icons.workspace_premium_rounded,
+                label: 'المستوى',
+                value: 'المستوى $_wealthLevel',
+              ),
             ],
           ),
         ),
@@ -383,22 +412,41 @@ class _ProfilePageState extends State<ProfilePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('نبذة عني', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
+              const Text(
+                'نبذة عني',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
+              ),
               const SizedBox(height: 8),
-              Text(_about, style: const TextStyle(color: AppColors.mutedText, height: 1.5)),
+              Text(
+                _about,
+                style: const TextStyle(color: AppColors.mutedText, height: 1.5),
+              ),
               if (_interests.isNotEmpty) ...[
                 const SizedBox(height: 14),
-                const Text('اهتماماتي', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900)),
+                const Text(
+                  'اهتماماتي',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900),
+                ),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 6,
                   runSpacing: 6,
-                  children: _interests.map((interest) => Chip(
-                    label: Text(interest, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700)),
-                    backgroundColor: const Color(0xFFFFF7ED),
-                    side: const BorderSide(color: Color(0xFFFED7AA)),
-                    visualDensity: VisualDensity.compact,
-                  )).toList(),
+                  children: _interests
+                      .map(
+                        (interest) => Chip(
+                          label: Text(
+                            interest,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          backgroundColor: const Color(0xFFFFF7ED),
+                          side: const BorderSide(color: Color(0xFFFED7AA)),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      )
+                      .toList(),
                 ),
               ],
             ],
@@ -448,7 +496,10 @@ class _ProfilePageState extends State<ProfilePage> {
                     if (_isPremium) ...[
                       const SizedBox(width: 6),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 3,
+                        ),
                         decoration: BoxDecoration(
                           color: const Color(0xFFFFF1D6),
                           borderRadius: BorderRadius.circular(99),
@@ -628,8 +679,8 @@ class _ProfilePageState extends State<ProfilePage> {
             onTap: _openWallet,
           ),
           _ActionButton(
-            label: 'VIP',
-            icon: Icons.diamond_rounded,
+            label: 'الاستقراطية',
+            icon: Icons.auto_awesome_rounded,
             color: const Color(0xFFF59E0B),
             background: const Color(0xFFFFF7D6),
             onTap: _openVip,
@@ -680,7 +731,7 @@ class _ProfilePageState extends State<ProfilePage> {
         children: [
           _MenuRow(
             icon: Icons.workspace_premium_rounded,
-            title: 'VIP',
+            title: 'الاستقراطية',
             color: const Color(0xFFF59E0B),
             onTap: _openVip,
           ),
@@ -769,13 +820,12 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  void _openVip() {
-    _showDetails(
-      title: 'VIP',
-      icon: Icons.workspace_premium_rounded,
-      color: const Color(0xFFF59E0B),
-      message: 'استكشف مزايا VIP وPRO عند تفعيل العضويات في المرحلة القادمة.',
-    );
+  Future<void> _openVip() async {
+    final updated = await Navigator.of(context)
+        .push<bool>(MaterialPageRoute(builder: (_) => const AristocracyPage()));
+    if (updated == true && mounted) {
+      await _load();
+    }
   }
 
   void _openSettings() {

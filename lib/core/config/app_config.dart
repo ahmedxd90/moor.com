@@ -6,6 +6,11 @@ class AppConfig {
     defaultValue: 'https://sakichat.freecpanel.shop/api.php',
   );
 
+  static const aristocracyUrl = String.fromEnvironment(
+    'SAKI_ARISTOCRACY_URL',
+    defaultValue: 'https://sakichat.freecpanel.shop/aristocracy/index.html',
+  );
+
   static const supabaseUrl = String.fromEnvironment(
     'SUPABASE_URL',
     defaultValue: 'https://uhaugikrudchlunaufjj.supabase.co',
