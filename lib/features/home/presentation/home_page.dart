@@ -423,10 +423,8 @@ class _HomePageState extends State<HomePage> {
                     } else {
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) => RoomPage(
-                            room: room,
-                            demoMode: widget.demoMode,
-                          ),
+                          builder: (_) =>
+                              RoomPage(room: room, demoMode: widget.demoMode),
                         ),
                       );
                     }
@@ -913,7 +911,7 @@ class _RoomCard extends StatelessWidget {
               const SizedBox(width: 11),
               Expanded(
                 child: SizedBox(
-                  height: 80,
+                  height: 92,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,

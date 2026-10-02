@@ -1,25 +1,66 @@
-# Saki Chat Flutter
+# Saki Chat — Flutter + Supabase
 
-هذه النسخة هي إعادة بناء أولية لتطبيق Saki Chat باستخدام **Flutter/Dart** وقاعدة **Supabase جديدة**. لا تعتمد النسخة على بيانات Convex القديمة؛ تبدأ من قاعدة فارغة وتحتوي على migration منظمة للجداول الأساسية.
+تطبيق Flutter/Dart عربي باتجاه RTL. يعتمد التطبيق الآن على **Supabase** للمصادقة والملف الشخصي والوسائط والبيانات والعمليات المالية داخل التطبيق؛ ولا يستدعي PHP من مسارات Flutter. ملفات `backend/php/` باقية في المستودع كمرجع قديم فقط، ولا تُشغّل على قاعدة Supabase.
 
-## ما تم بناؤه
+## ما هو موصول بـSupabase
 
-تم إنشاء أساس قابل للتشغيل يتضمن اتجاه RTL، ثيمًا فاتحًا برتقاليًا وأبيض، خط Tajawal، الأصول البصرية الرئيسية، تسجيل الدخول والتسجيل عبر Supabase Auth، الصفحة الرئيسية، بطاقات الغرف، الانضمام والمغادرة، شاشة الغرفة الصوتية الأساسية، رسائل الغرفة عبر Supabase Realtime، صفحة اللحظات، الرسائل الخاصة الأساسية، والملف الشخصي.
+- **Supabase Auth:** تسجيل البريد وكلمة المرور، تسجيل Google OAuth، استعادة كلمة المرور، ومزامنة حالة الجلسة مع التطبيق.
+- **الملف الشخصي:** بيانات المستخدم في `user_profiles.data`، تخصيص `saki_id`، وصور المستخدمين في bucket `user-media` بسياسات RLS.
+- **ميزات التطبيق:** الغرف والرسائل واللحظات والمحفظة والتفاعلات التي يستهلكها Flutter من جداول Supabase وRPCs القائمة.
+- **الأرستقراطية:** صفحة Flutter أصلية بدلاً من WebView/PHP. يوجد 6 رتب و48 ميزة seed، وجداول للرتب والعضوية والمشتريات وسجل الذهب. شراء الرتبة يتم عبر RPC ذرية `purchase_aristocracy` تُخصم من `room_wallets` بعد فحص الرصيد والصلاحيات، مع idempotency وRLS.
+- **Agora:** Edge Function باسم `agora-token` منشورة في Supabase وتتطلب JWT. شهادة Agora لا توضع في APK.
 
-المشروع يعمل افتراضيًا بوضع معاينة عندما لا تكون بيانات Supabase موجودة. هذا يسمح بمراجعة الواجهة دون إنشاء حساب أو قاعدة بيانات. عند إضافة قيم Supabase يتحول التطبيق إلى الوضع الحقيقي تلقائيًا. شاشة «أكمل معلوماتك» تحتوي فقط على صورة المستخدم واسم المستخدم والجنس والدولة؛ أما `saki_id` فيُولد ويحفظ في قاعدة البيانات ولا يظهر في هذه الشاشة.
-
-## تشغيل المعاينة
-
-```bash
-flutter pub get
-flutter run -d chrome
-```
+الأصول الثابتة للواجهة والخطوط والشارات تبقى ضمن `assets/` ومضمّنة في APK؛ لا يلزم رفعها إلى Storage. يُستخدم Supabase Storage لملفات المستخدمين التي يضيفها التطبيق.
 
 ## مشروع Supabase المرتبط
 
-المشروع المرتبط حاليًا هو `uhaugikrudchlunaufjj`، وتوجد فيه migrations ومخطط Saki الأساسي مسبقًا. تستخدم النسخة الحالية الجداول الموجودة مثل `user_profiles` و`voice_rooms` و`voice_room_members` و`posts` و`stories` و`conversations` و`messages`؛ لا تُشغّل migration bootstrap ثانية فوق هذا المشروع حتى لا تتكرر الجداول.
+المشروع المرتبط هو `Saki chat`، المعرّف `faxtmvvovorxximsnxzy`. إعداد Flutter الافتراضي في `lib/core/config/app_config.dart` يستخدم URL المشروع ومفتاح publishable عام؛ لا تضف مطلقًا `service_role` أو أي سر في التطبيق أو GitHub.
 
-بعد ذلك شغّل التطبيق باستخدام رابط المشروع والمفتاح العام:
+تسلسل التهيئة المسجل في المشروع يتضمن migrations الأساسية للمستخدمين والغرف والتفاعلات والمحفظة واللحظات، ثم:
+
+- `0011_restrict_sensitive_rpcs.sql` — قصر RPCs الحساسة على المستخدمين المسجلين وإبقاء دوال المحفزات داخلية.
+- `0012_aristocracy_supabase.sql` — مخطط الأرستقراطية وبيانات الرتب والميزات وRLS وRPC شراء الذهب.
+
+تأكد من تشغيل migrations بالترتيب على أي بيئة جديدة. في مشروع Supabase الحالي طُبقت migration `aristocracy_supabase_v1`، وتحققنا من وجود 6 صفوف للرتب و48 صفًا للميزات.
+
+## إعدادات مطلوبة قبل اختبار الخدمات الخارجية
+
+### Google OAuth والبريد
+
+مسار OAuth الأصلي موجود. أظهر فحص إعدادات Supabase العامة أن مزوّدي البريد وGoogle مفعّلان، كما قبل endpoint التفويض رابط الرجوع وأعاد توجيهًا إلى Google. لم يُكمل تسجيل دخول مستخدم فعلي من جهاز، لذا تأكد من صلاحية OAuth Client وتهيئة شاشة الموافقة في Google Cloud. استخدم callback التالي لـGoogle Cloud وأضف مخطط التطبيق إلى قائمة Redirect URLs في Supabase:
+
+```text
+https://faxtmvvovorxximsnxzy.supabase.co/auth/v1/callback
+saki.chat.co://login-callback
+```
+
+يجب كذلك إعداد قالب/بريد SMTP في Supabase لإرسال تأكيد الحساب وروابط استعادة كلمة المرور بصورة موثوقة. لا ترسل الأسرار في المحادثة ولا تضعها داخل APK.
+
+### Agora للغرف الصوتية
+
+الوظيفة المنشورة تحتاج ضبط الأسرار في إعدادات Supabase Edge Functions/Secrets:
+
+```text
+AGORA_APP_ID=<Agora App ID المطابق للقيمة المستخدمة في Flutter>
+AGORA_APP_CERTIFICATE=<Agora App Certificate>
+```
+
+من دون `AGORA_APP_CERTIFICATE` سترجع الوظيفة `agora_server_not_configured`؛ لم نضع شهادة سرية في التطبيق. بعد ضبط الأسرار اختبر إصدار token والانضمام من جهاز Android فعلي.
+
+### أرصدة وشحن الذهب
+
+شراء الأرستقراطية يعمل من رصيد `room_wallets`، ويمكن اختبار الرتبة الأرخص بعد مطالبة الذهب المجاني المتاحة يوميًا. إنشاء طلبات top-up ليس بوابة دفع: لا يوجد مزود دفع أو webhook مفعل في المستودع، ولذلك لا تعتبر حزم الشحن مدفوعات حقيقية حتى إضافة مزود موثوق والتحقق من إشعاراته على الخادم.
+
+## تشغيل وفحص التطبيق
+
+```bash
+flutter pub get
+flutter analyze
+flutter test
+flutter run
+```
+
+تجاوز إعداد Supabase الافتراضي عند الحاجة:
 
 ```bash
 flutter run \
@@ -27,73 +68,16 @@ flutter run \
   --dart-define=SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
 ```
 
-لا تضع `service_role` key داخل تطبيق الهاتف. تطبيق الهاتف يستخدم المفتاح العام فقط، بينما العمليات الإدارية أو المالية الحساسة يجب أن تُنفذ لاحقًا داخل Edge Functions أو PostgreSQL RPC محمية.
-
-Migration `0002_saki_id.sql` تضيف `saki_id` كرقم فريد من 9 أرقام يبدأ من `876431253` وتوفر RPC باسم `ensure_my_saki_id`. Migration `0003_user_media_storage.sql` تنشئ bucket باسم `user-media` وسياسات تسمح للمستخدم برفع ملفاته داخل مجلده فقط.
-
-## فيديو شاشة تسجيل الدخول
-
-تستخدم شاشة الدخول الفيديو نفسه الوارد في كود HTML المرفق داخل `assets/videos/saki-login-background.mp4`. يعمل الفيديو تلقائيًا، في حلقة مستمرة، بدون صوت، مع طبقة تعتيم فوقه للمحافظة على وضوح الحقول والأزرار. أضيفت حزمة `video_player` لدعم الويب وAndroid، مع خلفية بديلة إذا تعذر تشغيل الفيديو على جهاز أو متصفح قديم.
-
-## المصادقة بالبريد وGoogle
-
-المسار الحقيقي هو: تسجيل الدخول أو إنشاء حساب بالبريد وكلمة المرور، ثم فحص `user_profiles`. إذا لم يكن الملف مكتملًا تُفتح شاشة «أكمل معلوماتك»، وبعد الحفظ تُفتح الصفحة الرئيسية تلقائيًا.
-
-لتفعيل Google Provider في Supabase، أنشئ OAuth Client من نوع Web في Google Cloud، ثم أضف Client ID وClient Secret داخل Supabase Auth > Providers > Google. أضف رابط callback الخاص بالمشروع في Google Cloud، وأضف روابط التطبيق إلى قائمة Redirect URLs في Supabase:
-
-```text
-https://uhaugikrudchlunaufjj.supabase.co/auth/v1/callback
-https://8080-i4cnwrwg7od5jc89wmu3y-5b008138.sg1.manus.computer
-saki.chat.co://login-callback
-```
-
-رابط اختبار الويب الحالي هو [Saki Chat Web](https://8080-i4cnwrwg7od5jc89wmu3y-5b008138.sg1.manus.computer). عند بناء نسخة أخرى استخدم `--dart-define=SUPABASE_AUTH_REDIRECT=<your-web-origin>` إذا كان رابط الويب مختلفًا.
-
-## Realtime وStorage
-
-بعد تنفيذ الـ migration، فعّل Postgres Changes للجداول التي تحتاج تحديثًا فوريًا من لوحة Supabase أو نفّذ أوامر `alter publication` المعلّقة في نهاية ملف migration. يجب مراجعة سياسات RLS قبل استخدام التطبيق في الإنتاج، خصوصًا للجداول المالية، الهدايا، الإدارة، والبث.
-
-## التحقق
+## بناء Android
 
 ```bash
-dart format lib
-flutter analyze
-flutter build web --release
+flutter build apk --release
 ```
 
-## هيكل المشروع
+ملف الناتج المعتاد:
 
 ```text
-lib/
-  core/
-    config/       إعدادات dart-define
-    supabase/     تهيئة العميل
-    theme/        الألوان والثيم
-    widgets/      مكونات الواجهة المشتركة
-  features/
-    auth/         تسجيل الدخول والتسجيل وإكمال المعلومات
-    home/         الحاوية الرئيسية والصفحة الرئيسية
-    rooms/        الغرف والمقاعد
-    messages/     رسائل الغرفة والرسائل الخاصة
-    moments/      اللحظات والمنشورات
-    profile/      الملف الشخصي
-supabase/
-  migrations/    ملاحظات التكامل؛ مخطط المشروع موجود مسبقًا على Supabase
-assets/
-  images/        شعار وأصول عامة
-  levels/        شارات المستويات
+build/app/outputs/flutter-apk/app-release.apk
 ```
 
-## النطاق اللاحق
-
-المشروع الأصلي كبير ويحتوي على ألعاب متعددة، Agora/Zego، مكالمات فيديو، الإشعارات، المدفوعات، الهدايا، الإدارة، العائلات، VIP/PRO، والبث المباشر. هذه الوحدات تحتاج مراحل مستقلة وتكاملات Flutter أصلية، لذلك لم يتم اختصارها بواجهات وهمية داخل migration الأولى. سيتم إضافتها فوق هذا الأساس مع الحفاظ على نفس الهوية البصرية.
-
-## مراجع تقنية
-
-يوصى بمراجعة [دليل Supabase Flutter الرسمي][1] و[مرجع supabase_flutter][2] و[إرشادات RLS الرسمية][3] قبل نشر قاعدة البيانات. يوضح دليل Supabase أن تطبيقات Flutter تهيئ العميل باستخدام عنوان المشروع والمفتاح العام، وأن الجداول المكشوفة يجب حمايتها بسياسات RLS. كما يوضح مرجع Realtime ضرورة ضبط قنوات Realtime وسياسات `realtime.messages` عند استخدام القنوات الخاصة.
-
-[1]: https://supabase.com/docs/guides/getting-started/quickstarts/flutter "Supabase Flutter Quickstart"
-[2]: https://supabase.com/docs/reference/dart/introduction "Supabase Flutter Client Reference"
-[3]: https://supabase.com/docs/guides/database/postgres/row-level-security "Supabase Row Level Security"
-[4]: https://supabase.com/docs/guides/auth/social-login/auth-google "Supabase Google OAuth"
-[5]: https://supabase.com/docs/guides/auth/native-mobile-deep-linking "Supabase Native Deep Linking"
+إعداد release الحالي موقّع بمفتاح debug لأغراض الاختبار والتثبيت المباشر فقط. يلزم keystore release خاص وتوقيع صحيح قبل النشر في Google Play.

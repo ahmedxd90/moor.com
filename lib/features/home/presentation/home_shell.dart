@@ -178,7 +178,7 @@ class _BottomNavigation extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Container(
-        height: 66,
+        height: 72,
         decoration: const BoxDecoration(
           color: Colors.white,
           border: Border(top: BorderSide(color: Color(0xFFE5E7EB))),

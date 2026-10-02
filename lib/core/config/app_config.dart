@@ -1,28 +1,18 @@
 class AppConfig {
   const AppConfig._();
 
-  static const apiUrl = String.fromEnvironment(
-    'SAKI_API_URL',
-    defaultValue: 'https://sakichat.freecpanel.shop/api.php',
-  );
-
-  static const aristocracyUrl = String.fromEnvironment(
-    'SAKI_ARISTOCRACY_URL',
-    defaultValue: 'https://sakichat.freecpanel.shop/aristocracy/index.html',
-  );
-
   static const supabaseUrl = String.fromEnvironment(
     'SUPABASE_URL',
-    defaultValue: 'https://uhaugikrudchlunaufjj.supabase.co',
+    defaultValue: 'https://faxtmvvovorxximsnxzy.supabase.co',
   );
 
   static const supabasePublishableKey = String.fromEnvironment(
     'SUPABASE_PUBLISHABLE_KEY',
-    defaultValue: 'sb_publishable_wPa5bmVYZ7D-oy9qHPqHKg_Jvb0rgpX',
+    defaultValue: 'sb_publishable_tZvg-hzXKI10JxiHJRht3w_Aa7rFOjN',
   );
 
   static const appName = 'Saki Chat';
-  static const appVersion = '1.0.0';
+  static const appVersion = '1.0.1';
   static const androidPackage = 'saki.chat.co';
   static const authRedirectOverride = String.fromEnvironment(
     'SUPABASE_AUTH_REDIRECT',
@@ -33,6 +23,4 @@ class AppConfig {
       supabaseUrl.startsWith('https://') &&
       !supabaseUrl.contains('YOUR_PROJECT') &&
       supabasePublishableKey != 'YOUR_SUPABASE_PUBLISHABLE_KEY';
-
-  static bool get apiConfigured => apiUrl.startsWith('https://');
 }
